@@ -1,6 +1,6 @@
 import PptxGenJS from "pptxgenjs";
 import type { Study } from "@/types";
-import { DOC_THEME, difficultyLabel } from "./theme";
+import { difficultyLabel } from "./theme";
 
 export async function buildPptxBuffer(study: Study): Promise<Buffer> {
   const pptx = new PptxGenJS();

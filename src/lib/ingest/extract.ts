@@ -55,22 +55,7 @@ export async function pdfToImages(
     for (let i = 1; i <= pageCount; i++) {
       const page = await doc.getPage(i);
       const viewport = page.getViewport({ scale: 1.5 }); // ~150 DPI-ish
-      const canvasFactory = {
-        create: (width: number, height: number) => {
-          // Minimal canvas polyfill for Node – we use sharp path instead when possible
-          // For robustness we render via pdfjs operator list is complex;
-          // fallback: return empty and rely on vision of original if needed.
-          return {
-            width,
-            height,
-            getContext: () => null,
-          };
-        },
-        reset: () => {},
-        destroy: () => {},
-      };
-
-      // Simpler approach for reliability in serverless: use a lightweight
+            // Simpler approach for reliability in serverless: use a lightweight
       // rasterization if available, otherwise skip image conversion here
       // and let the caller send the original PDF page as image later.
       // For production we recommend a dedicated service; here we provide
@@ -79,7 +64,6 @@ export async function pdfToImages(
       try {
         // Optional: node-canvas is not installed in serverless by default.
         // Use Function constructor so webpack does not try to resolve 'canvas'.
-        // eslint-disable-next-line no-new-func
         const requireCanvas = new Function("m", "return require(m)");
         const { createCanvas } = requireCanvas("canvas");
         const canvas = createCanvas(viewport.width, viewport.height);

@@ -11,6 +11,7 @@ import {
   WidthType,
   PageBreak,
   AlignmentType,
+  type FileChild,
 } from "docx";
 import type { Study } from "@/types";
 import { difficultyLabel } from "./theme";
@@ -20,7 +21,7 @@ export async function buildDocxBuffer(study: Study): Promise<Buffer> {
   const questions = study.quiz?.questions ?? [];
   const cards = study.flashcards?.cards ?? [];
 
-  const children: Paragraph[] = [];
+  const children: FileChild[] = [];
 
   // Title
   children.push(
@@ -170,7 +171,7 @@ export async function buildDocxBuffer(study: Study): Promise<Buffer> {
   for (let i = 0; i < cards.length; i += 2) {
     const left = cards[i];
     const right = cards[i + 1];
-    const cell = (c: typeof left | undefined) =>
+    const cell = (c: (typeof cards)[0] | undefined) =>
       new TableCell({
         width: { size: 4500, type: WidthType.DXA },
         borders: {
@@ -203,7 +204,7 @@ export async function buildDocxBuffer(study: Study): Promise<Buffer> {
       new Table({
         width: { size: 9000, type: WidthType.DXA },
         rows: tableRows,
-      }) as unknown as Paragraph
+      })
     );
   }
 
@@ -213,12 +214,7 @@ export async function buildDocxBuffer(study: Study): Promise<Buffer> {
     styles: {
       default: {
         document: {
-          styles: [
-            {
-              id: "Normal",
-              run: { font: "Calibri", size: 22 },
-            },
-          ],
+          run: { font: "Calibri", size: 22 },
         },
       },
       paragraphStyles: [

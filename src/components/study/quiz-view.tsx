@@ -15,7 +15,7 @@ export function QuizView({ quiz }: { quiz: Quiz }) {
   const [revealed, setRevealed] = useState(false);
   const [score, setScore] = useState(0);
   const [finished, setFinished] = useState(false);
-  const [answers, setAnswers] = useState<boolean[]>([]);
+  const [, setAnswers] = useState<boolean[]>([]);
 
   const q = questions[index];
 

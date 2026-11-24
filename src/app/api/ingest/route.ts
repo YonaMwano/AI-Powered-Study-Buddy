@@ -18,8 +18,7 @@ export async function POST(req: NextRequest) {
     const formData = await req.formData();
     const file = formData.get("file") as File | null;
     const plainText = formData.get("text") as string | null;
-    const guestIdFromClient = formData.get("guestId") as string | null;
-
+    
     // ----- Text-only path (allowed for guests) -----
     if (plainText && plainText.trim().length > 0 && !file) {
       const guestId = user ? null : await getOrCreateGuestId();

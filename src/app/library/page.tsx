@@ -7,7 +7,7 @@ import { Header } from "@/components/layout/header";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
-import { BookOpen, FileText, Image, Trash2, Loader2 } from "lucide-react";
+import { BookOpen, FileText, ImageIcon, Trash2, Loader2 } from "lucide-react";
 import { useUser } from "@/hooks/use-user";
 import { toast } from "sonner";
 
@@ -111,7 +111,7 @@ export default function LibraryPage() {
                     <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-indigo-50 text-indigo-600 dark:bg-indigo-950/50 dark:text-indigo-400">
                       {(s.documents?.source_type || "").includes("image") ||
                       s.documents?.source_type === "pdf_scan" ? (
-                        <Image className="h-4 w-4" />
+                        <ImageIcon className="h-4 w-4" />
                       ) : (
                         <FileText className="h-4 w-4" />
                       )}
