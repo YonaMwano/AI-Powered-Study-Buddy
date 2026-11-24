@@ -1,0 +1,12 @@
+# StudyBuddy AI is a Node.js / Next.js application.
+# Python is not required for the main app.
+#
+# Install Node dependencies with:
+#   npm install
+#
+# Optional: if you use local scripts that call Python (e.g. OCR experiments),
+# uncomment and install with: pip install -r requirements.txt
+#
+# pillow>=10.0.0
+# pdf2image>=1.17.0
+# pytesseract>=0.3.10
