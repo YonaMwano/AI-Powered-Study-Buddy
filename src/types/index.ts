@@ -29,7 +29,7 @@ export const ExplainerSectionSchema = z.object({
   body: z.array(z.string()),
   keyPoints: z.array(z.string()).max(8),
   diagramPrompt: z.string().optional(),
-  diagramUrl: z.string().url().optional().nullable(),
+  diagramUrl: z.string().optional().nullable(),
 });
 
 export type ExplainerSection = z.infer<typeof ExplainerSectionSchema>;
@@ -68,7 +68,7 @@ export const FlashcardSchema = z.object({
   front: z.string(),
   back: z.string(),
   imagePrompt: z.string().optional(),
-  imageUrl: z.string().url().optional().nullable(),
+  imageUrl: z.string().optional().nullable(),
 });
 
 export type Flashcard = z.infer<typeof FlashcardSchema>;

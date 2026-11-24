@@ -77,9 +77,11 @@ export async function pdfToImages(
       // a best-effort path.
 
       try {
-        // Attempt render with node-canvas if present, else skip
-        // eslint-disable-next-line @typescript-eslint/no-require-imports
-        const { createCanvas } = require("canvas");
+        // Optional: node-canvas is not installed in serverless by default.
+        // Use Function constructor so webpack does not try to resolve 'canvas'.
+        // eslint-disable-next-line no-new-func
+        const requireCanvas = new Function("m", "return require(m)");
+        const { createCanvas } = requireCanvas("canvas");
         const canvas = createCanvas(viewport.width, viewport.height);
         const context = canvas.getContext("2d");
         await page.render({
@@ -101,8 +103,7 @@ export async function pdfToImages(
           .toBuffer();
         images.push(jpeg);
       } catch {
-        // canvas not available – skip rasterization in this environment
-        // Caller will treat as text-only or use original file for vision
+        // canvas not available – skip rasterization; vision path uses images when present
       }
     }
 

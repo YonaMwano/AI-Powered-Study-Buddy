@@ -2,6 +2,8 @@
  * kie.ai nano-banana-2-1 image generation
  */
 
+import type { StudyGeneration } from "@/types";
+
 const KIE_CREATE = "https://api.kie.ai/api/v1/jobs/createTask";
 
 export async function createIllustration(prompt: string): Promise<string | null> {
@@ -37,7 +39,6 @@ export async function createIllustration(prompt: string): Promise<string | null>
     }
 
     const data = await res.json();
-    // Response shapes vary; try common fields
     const taskId =
       data?.data?.taskId ||
       data?.taskId ||
@@ -46,7 +47,6 @@ export async function createIllustration(prompt: string): Promise<string | null>
       data?.jobId;
 
     if (!taskId) {
-      // Some responses return image URL immediately
       const url =
         data?.data?.url ||
         data?.url ||
@@ -57,7 +57,6 @@ export async function createIllustration(prompt: string): Promise<string | null>
       return null;
     }
 
-    // Poll for result (max ~60s)
     const statusUrl = `https://api.kie.ai/api/v1/jobs/recordInfo?taskId=${taskId}`;
     for (let i = 0; i < 20; i++) {
       await new Promise((r) => setTimeout(r, 3000));
@@ -79,7 +78,6 @@ export async function createIllustration(prompt: string): Promise<string | null>
           info?.url ||
           info?.data?.result?.url;
         if (typeof url === "string") return url;
-        // Sometimes nested
         try {
           const parsed =
             typeof info?.data?.resultJson === "string"
@@ -103,31 +101,29 @@ export async function createIllustration(prompt: string): Promise<string | null>
 }
 
 /**
- * Attach diagram / flashcard images to a study payload (max 3 diagrams).
+ * Attach diagram / flashcard images to a full study payload (max 3 diagrams).
+ * Returns the same StudyGeneration shape with optional URLs filled in.
  */
 export async function attachIllustrations(
-  study: {
-    explainer: {
-      sections: Array<{
-        heading: string;
-        body: string[];
-        keyPoints: string[];
-        diagramPrompt?: string;
-        diagramUrl?: string | null;
-      }>;
-    };
-    flashcards: {
-      cards: Array<{
-        front: string;
-        back: string;
-        imagePrompt?: string;
-        imageUrl?: string | null;
-      }>;
-    };
-  },
+  study: StudyGeneration,
   opts: { diagrams: boolean; flashcardImages: boolean }
-): Promise<typeof study> {
-  const next = structuredClone(study);
+): Promise<StudyGeneration> {
+  const next: StudyGeneration = {
+    title: study.title,
+    difficulty: study.difficulty,
+    explainer: {
+      sections: study.explainer.sections.map((s) => ({ ...s })),
+    },
+    quiz: {
+      questions: study.quiz.questions.map((q) => ({
+        ...q,
+        options: q.options ? [...q.options] : undefined,
+      })),
+    },
+    flashcards: {
+      cards: study.flashcards.cards.map((c) => ({ ...c })),
+    },
+  };
 
   if (opts.diagrams) {
     let count = 0;
@@ -146,7 +142,6 @@ export async function attachIllustrations(
   }
 
   if (opts.flashcardImages) {
-    // Illustrate first 4 cards that have prompts
     let count = 0;
     for (const card of next.flashcards.cards) {
       if (count >= 4) break;
