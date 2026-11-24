@@ -45,7 +45,6 @@ export async function pdfToImages(
 ): Promise<{ images: Buffer[]; pageCount: number }> {
   try {
     const pdfjs = await import("pdfjs-dist/legacy/build/pdf.mjs");
-    // @ts-expect-error – worker not needed in Node for getDocument
     const doc = await pdfjs.getDocument({ data: new Uint8Array(buffer) }).promise;
     const pageCount = Math.min(doc.numPages, maxPages);
     const images: Buffer[] = [];
