@@ -34,16 +34,12 @@ export async function extractPdfText(buffer: Buffer): Promise<{
 /**
  * PDF → images for vision.
  * On Vercel/serverless we skip native canvas rasterization (not available).
- * Scanned PDFs still go through the vision path when the client uploads
- * page images, or when extracted text is empty (caller can retry with photos).
  */
 export async function pdfToImages(
   _buffer: Buffer,
-  _maxPages = 12
+  maxPages = 12
 ): Promise<{ images: Buffer[]; pageCount: number }> {
-  // Native canvas + pdfjs render is not reliable on Vercel.
-  // Return empty; extractFromBuffer will still mark source as pdf_scan
-  // when text is sparse so the UI can prompt for clearer input if needed.
+  void maxPages;
   return { images: [], pageCount: 1 };
 }
 
@@ -62,7 +58,7 @@ export async function extractPptx(buffer: Buffer): Promise<string> {
   try {
     const officeParser = await import("officeparser");
     const text = await new Promise<string>((resolve, reject) => {
-      officeParser.parseOffice(buffer, (data: string, err: Error) => {
+      officeParser.parseOffice(buffer, (data: string, err: Error | null) => {
         if (err) reject(err);
         else resolve(data || "");
       });
