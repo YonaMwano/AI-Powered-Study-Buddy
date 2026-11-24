@@ -45,6 +45,7 @@ export async function pdfToImages(
 ): Promise<{ images: Buffer[]; pageCount: number }> {
   try {
     const pdfjs = await import("pdfjs-dist/legacy/build/pdf.mjs");
+    // @ts-expect-error – worker not needed in Node for getDocument
     const doc = await pdfjs.getDocument({ data: new Uint8Array(buffer) }).promise;
     const pageCount = Math.min(doc.numPages, maxPages);
     const images: Buffer[] = [];
@@ -70,6 +71,14 @@ export async function pdfToImages(
         await page.render({
           canvasContext: context,
           viewport,
+          canvasFactory: {
+            create: (w: number, h: number) => createCanvas(w, h),
+            reset: (c: { width: number; height: number }, w: number, h: number) => {
+              c.width = w;
+              c.height = h;
+            },
+            destroy: () => {},
+          },
         }).promise;
         const png = canvas.toBuffer("image/png");
         const jpeg = await sharp(png)
@@ -103,8 +112,13 @@ export async function extractDocx(buffer: Buffer): Promise<string> {
 export async function extractPptx(buffer: Buffer): Promise<string> {
   try {
     // officeparser supports pptx
-    const { parseOfficeAsync } = await import("officeparser");
-    const text = await parseOfficeAsync(buffer);
+    const officeParser = await import("officeparser");
+    const text = await new Promise<string>((resolve, reject) => {
+      officeParser.parseOffice(buffer, (data: string, err: Error) => {
+        if (err) reject(err);
+        else resolve(data || "");
+      });
+    });
     return text.trim();
   } catch (err) {
     console.error("pptx extract failed", err);
