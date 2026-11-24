@@ -6,7 +6,7 @@ import {
   View,
   StyleSheet,
   Image,
-  pdf,
+  renderToBuffer,
 } from "@react-pdf/renderer";
 import type { Study } from "@/types";
 import { DOC_THEME, difficultyLabel } from "./theme";
@@ -242,7 +242,5 @@ function StudyPdfDocument({ study }: { study: Study }) {
 }
 
 export async function buildPdfBuffer(study: Study): Promise<Buffer> {
-  const doc = <StudyPdfDocument study={study} />;
-  const blob = await pdf(doc).toBuffer();
-  return Buffer.from(blob);
+  return renderToBuffer(<StudyPdfDocument study={study} />);
 }
