@@ -223,3 +223,39 @@ DROP TRIGGER IF EXISTS set_profiles_updated_at ON public.profiles;
 CREATE TRIGGER set_profiles_updated_at
   BEFORE UPDATE ON public.profiles
   FOR EACH ROW EXECUTE FUNCTION public.set_updated_at();
+
+-- ============================================================
+-- STORAGE BUCKETS (run once in SQL editor if not created)
+-- ============================================================
+INSERT INTO storage.buckets (id, name, public)
+VALUES
+  ('documents', 'documents', false),
+  ('exports', 'exports', false),
+  ('illustrations', 'illustrations', true)
+ON CONFLICT (id) DO NOTHING;
+
+-- Allow authenticated users to upload to their own folder
+CREATE POLICY IF NOT EXISTS "auth upload documents"
+  ON storage.objects FOR INSERT TO authenticated
+  WITH CHECK (bucket_id = 'documents' AND (storage.foldername(name))[1] = auth.uid()::text);
+
+CREATE POLICY IF NOT EXISTS "auth read documents"
+  ON storage.objects FOR SELECT TO authenticated
+  USING (bucket_id = 'documents' AND (storage.foldername(name))[1] = auth.uid()::text);
+
+CREATE POLICY IF NOT EXISTS "auth upload exports"
+  ON storage.objects FOR INSERT TO authenticated
+  WITH CHECK (bucket_id = 'exports' AND (storage.foldername(name))[1] = auth.uid()::text);
+
+CREATE POLICY IF NOT EXISTS "auth read exports"
+  ON storage.objects FOR SELECT TO authenticated
+  USING (bucket_id = 'exports' AND (storage.foldername(name))[1] = auth.uid()::text);
+
+-- Public read for illustration images
+CREATE POLICY IF NOT EXISTS "public read illustrations"
+  ON storage.objects FOR SELECT TO public
+  USING (bucket_id = 'illustrations');
+
+CREATE POLICY IF NOT EXISTS "auth upload illustrations"
+  ON storage.objects FOR INSERT TO authenticated
+  WITH CHECK (bucket_id = 'illustrations');

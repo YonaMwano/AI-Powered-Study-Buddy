@@ -41,7 +41,13 @@ export async function POST(req: NextRequest) {
       if (error || !doc) {
         console.error("insert text document", error);
         return NextResponse.json(
-          { error: "Failed to save document" },
+          {
+            error:
+              error?.message?.includes("row-level security") || error?.code === "42501"
+                ? "Failed to save document — set SUPABASE_SERVICE_ROLE_KEY in Vercel and run supabase/schema.sql"
+                : "Failed to save document",
+            detail: error?.message,
+          },
           { status: 500 }
         );
       }
@@ -136,7 +142,13 @@ export async function POST(req: NextRequest) {
     if (error || !doc) {
       console.error("insert document", error);
       return NextResponse.json(
-        { error: "Failed to save document" },
+        {
+          error:
+            error?.message?.includes("row-level security") || error?.code === "42501"
+              ? "Failed to save document — set SUPABASE_SERVICE_ROLE_KEY in Vercel and run supabase/schema.sql"
+              : "Failed to save document",
+          detail: error?.message,
+        },
         { status: 500 }
       );
     }

@@ -55,7 +55,13 @@ function LoginForm() {
     setLoading("email");
     const { error } = await supabase.auth.signInWithPassword({ email, password });
     if (error) {
-      toast.error(error.message);
+      const msg =
+        error.message.toLowerCase().includes("email not confirmed")
+          ? "Confirm your email first (check inbox / spam), or disable email confirmations in Supabase Auth settings."
+          : error.message.toLowerCase().includes("invalid login")
+            ? "Invalid email or password"
+            : error.message;
+      toast.error(msg);
       setLoading(null);
       return;
     }

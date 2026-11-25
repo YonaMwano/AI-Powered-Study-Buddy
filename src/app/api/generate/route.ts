@@ -34,7 +34,6 @@ export async function POST(req: NextRequest) {
       includeFlashcardImages?: boolean;
     };
 
-    // Guest quota
     let guestId: string | null = null;
     if (!user) {
       guestId = await getOrCreateGuestId();
@@ -47,9 +46,14 @@ export async function POST(req: NextRequest) {
       }
     }
 
+    // Prefer service role (bypasses RLS). Fall back to user client when logged in.
     const service = await createServiceClient();
+    const writer = process.env.SUPABASE_SERVICE_ROLE_KEY
+      ? service
+      : user
+        ? supabase
+        : service;
 
-    // Resolve source text
     let sourceText = (directText || "").trim();
     let resolvedDocumentId = documentId || null;
 
@@ -65,6 +69,12 @@ export async function POST(req: NextRequest) {
       if (doc.user_id && user?.id !== doc.user_id) {
         return NextResponse.json({ error: "Forbidden" }, { status: 403 });
       }
+      if (!doc.user_id && doc.guest_id) {
+        const gid = await getOrCreateGuestId();
+        if (gid !== doc.guest_id) {
+          return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+        }
+      }
       sourceText = (doc.extracted_text || sourceText || "").trim();
       resolvedDocumentId = doc.id;
     }
@@ -76,7 +86,6 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    // Generate
     const { study, model, tokensIn, tokensOut } = await generateStudyFromText({
       text: sourceText,
       difficulty,
@@ -84,7 +93,6 @@ export async function POST(req: NextRequest) {
       includeFlashcardImages: !!user && includeFlashcardImages,
     });
 
-    // Optional illustrations (signed-in only)
     let finalStudy = study;
     if (user && (includeDiagrams || includeFlashcardImages)) {
       try {
@@ -97,8 +105,7 @@ export async function POST(req: NextRequest) {
       }
     }
 
-    // Persist study
-    const { data: row, error: insertErr } = await service
+    const { data: row, error: insertErr } = await writer
       .from("studies")
       .insert({
         document_id: resolvedDocumentId,
@@ -113,8 +120,8 @@ export async function POST(req: NextRequest) {
         model_vision: null,
         tokens_in: tokensIn,
         tokens_out: tokensOut,
-        has_diagrams: !!includeDiagrams && user,
-        has_flashcard_images: !!includeFlashcardImages && user,
+        has_diagrams: !!(includeDiagrams && user),
+        has_flashcard_images: !!(includeFlashcardImages && user),
       })
       .select("id, title")
       .single();
@@ -122,7 +129,14 @@ export async function POST(req: NextRequest) {
     if (insertErr || !row) {
       console.error("insert study", insertErr);
       return NextResponse.json(
-        { error: "Failed to save study" },
+        {
+          error:
+            insertErr?.message?.includes("row-level security") ||
+            insertErr?.code === "42501"
+              ? "Failed to save study — set SUPABASE_SERVICE_ROLE_KEY in Vercel env and re-run schema.sql"
+              : "Failed to save study",
+          detail: insertErr?.message,
+        },
         { status: 500 }
       );
     }

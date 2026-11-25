@@ -9,6 +9,12 @@ import type { ExportFormat, Study } from "@/types";
 export const runtime = "nodejs";
 export const maxDuration = 120;
 
+const CONTENT_TYPES: Record<ExportFormat, string> = {
+  pdf: "application/pdf",
+  docx: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+  pptx: "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+};
+
 export async function POST(req: NextRequest) {
   try {
     const supabase = await createClient();
@@ -22,21 +28,22 @@ export async function POST(req: NextRequest) {
       format?: ExportFormat;
     };
 
-    if (!studyId || !format || !["pdf", "pptx", "docx"].includes(format)) {
+    if (!studyId || !format || !["pdf", "docx", "pptx"].includes(format)) {
       return NextResponse.json(
-        { error: "studyId and format (pdf|pptx|docx) required" },
+        { error: "studyId and format (pdf|docx|pptx) required" },
         { status: 400 }
       );
     }
 
     const service = await createServiceClient();
-    const { data: study, error } = await service
+
+    const { data: study, error: studyErr } = await service
       .from("studies")
       .select("*")
       .eq("id", studyId)
       .single();
 
-    if (error || !study) {
+    if (studyErr || !study) {
       return NextResponse.json({ error: "Study not found" }, { status: 404 });
     }
 
@@ -52,65 +59,63 @@ export async function POST(req: NextRequest) {
       }
     }
 
-    // Create export job row
-    const { data: job, error: jobErr } = await service
-      .from("exports")
-      .insert({
-        study_id: studyId,
-        user_id: user?.id ?? null,
-        format,
-        status: "processing",
-      })
-      .select("id")
-      .single();
+    const studyPayload = study as unknown as Study & {
+      id: string;
+      title: string;
+      difficulty: string;
+      explainer: Study["explainer"];
+      quiz: Study["quiz"];
+      flashcards: Study["flashcards"];
+    };
 
-    if (jobErr || !job) {
-      console.error(jobErr);
-      return NextResponse.json({ error: "Failed to create export job" }, { status: 500 });
-    }
-
-    // Build document
     let buffer: Buffer;
-    let contentType: string;
-    let ext: string;
-
     try {
       if (format === "pdf") {
-        buffer = await buildPdfBuffer(study as Study);
-        contentType = "application/pdf";
-        ext = "pdf";
-      } else if (format === "pptx") {
-        buffer = await buildPptxBuffer(study as Study);
-        contentType =
-          "application/vnd.openxmlformats-officedocument.presentationml.presentation";
-        ext = "pptx";
+        buffer = await buildPdfBuffer(studyPayload);
+      } else if (format === "docx") {
+        buffer = await buildDocxBuffer(studyPayload);
       } else {
-        buffer = await buildDocxBuffer(study as Study);
-        contentType =
-          "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
-        ext = "docx";
+        buffer = await buildPptxBuffer(studyPayload);
       }
     } catch (buildErr) {
       console.error("export build failed", buildErr);
-      await service
-        .from("exports")
-        .update({
-          status: "failed",
-          error_message: buildErr instanceof Error ? buildErr.message : "Build failed",
-        })
-        .eq("id", job.id);
       return NextResponse.json(
-        { error: "Document generation failed" },
+        {
+          error:
+            buildErr instanceof Error
+              ? `Build failed: ${buildErr.message}`
+              : "Failed to build document",
+        },
         { status: 500 }
       );
     }
 
-    // Upload to storage
+    const contentType = CONTENT_TYPES[format];
+    const ext = format;
     const safeTitle = (study.title || "study")
       .replace(/[^a-z0-9]+/gi, "-")
       .slice(0, 40)
-      .toLowerCase();
-    const storagePath = `${user?.id || "guest"}/${studyId}/${job.id}-${safeTitle}.${ext}`;
+      .toLowerCase() || "study";
+
+    // Record export job (best-effort)
+    let jobId: string | null = null;
+    try {
+      const { data: job } = await service
+        .from("exports")
+        .insert({
+          study_id: studyId,
+          user_id: user?.id ?? null,
+          format,
+          status: "processing",
+        })
+        .select("id")
+        .single();
+      jobId = job?.id ?? null;
+    } catch (jobErr) {
+      console.warn("export job insert skipped", jobErr);
+    }
+
+    const storagePath = `${user?.id || "guest"}/${studyId}/${jobId || crypto.randomUUID()}-${safeTitle}.${ext}`;
 
     let signedUrl: string | null = null;
     try {
@@ -120,36 +125,38 @@ export async function POST(req: NextRequest) {
           contentType,
           upsert: true,
         });
+
       if (!upErr) {
         const { data: signed } = await service.storage
           .from("exports")
           .createSignedUrl(storagePath, 60 * 60 * 24 * 7);
         signedUrl = signed?.signedUrl ?? null;
       } else {
-        console.warn("storage upload error", upErr);
+        console.warn("storage upload error", upErr.message);
       }
     } catch (stErr) {
       console.warn("storage skipped", stErr);
     }
 
-    // Fallback: return base64 data URL if storage unavailable
+    // Always have a usable download if storage is missing
     if (!signedUrl) {
-      const b64 = buffer.toString("base64");
-      signedUrl = `data:${contentType};base64,${b64}`;
+      signedUrl = `data:${contentType};base64,${buffer.toString("base64")}`;
     }
 
-    await service
-      .from("exports")
-      .update({
-        status: "ready",
-        file_url: signedUrl.startsWith("data:") ? null : signedUrl,
-        storage_path: storagePath,
-        bytes: buffer.length,
-      })
-      .eq("id", job.id);
+    if (jobId) {
+      await service
+        .from("exports")
+        .update({
+          status: "ready",
+          file_url: signedUrl.startsWith("data:") ? null : signedUrl,
+          storage_path: storagePath,
+          bytes: buffer.length,
+        })
+        .eq("id", jobId);
+    }
 
     return NextResponse.json({
-      jobId: job.id,
+      jobId,
       status: "ready",
       signedUrl,
       bytes: buffer.length,
@@ -160,7 +167,10 @@ export async function POST(req: NextRequest) {
   } catch (err) {
     console.error("export error", err);
     return NextResponse.json(
-      { error: "Export failed" },
+      {
+        error:
+          err instanceof Error ? err.message : "Export failed",
+      },
       { status: 500 }
     );
   }
