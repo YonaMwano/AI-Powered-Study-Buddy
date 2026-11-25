@@ -48,7 +48,7 @@ export async function POST(req: NextRequest) {
 
     // Prefer service role (bypasses RLS). Fall back to user client when logged in.
     const service = await createServiceClient();
-    const writer = process.env.SUPABASE_SERVICE_ROLE_KEY
+    const writer = (process.env.SUPABASE_SECRET_KEY || process.env.SUPABASE_SERVICE_ROLE_KEY)
       ? service
       : user
         ? supabase
@@ -133,7 +133,7 @@ export async function POST(req: NextRequest) {
           error:
             insertErr?.message?.includes("row-level security") ||
             insertErr?.code === "42501"
-              ? "Failed to save study — set SUPABASE_SERVICE_ROLE_KEY in Vercel env and re-run schema.sql"
+              ? "Failed to save study — set SUPABASE_SECRET_KEY (or SUPABASE_SERVICE_ROLE_KEY) in Vercel and run schema.sql"
               : "Failed to save study",
           detail: insertErr?.message,
         },

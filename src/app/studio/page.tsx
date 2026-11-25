@@ -57,14 +57,27 @@ function StudioInner() {
   const supabase = createClient();
 
   useEffect(() => {
-    supabase.auth.getUser().then(({ data }) => {
-      if (data.user) setUser({ id: data.user.id, email: data.user.email });
-    });
+    // After Google OAuth, session may land a tick later — refresh until ready
+    const sync = async () => {
+      const { data } = await supabase.auth.getSession();
+      if (data.session?.user) {
+        setUser({ id: data.session.user.id, email: data.session.user.email });
+      }
+    };
+    sync();
+    if (typeof window !== "undefined" && new URLSearchParams(window.location.search).get("auth") === "success") {
+      const url = new URL(window.location.href);
+      url.searchParams.delete("auth");
+      window.history.replaceState({}, "", url.pathname + url.search);
+      // Ensure server components see the session
+      router.refresh();
+      toast.success("Signed in");
+    }
     const { data: sub } = supabase.auth.onAuthStateChange((_e, session) => {
       setUser(session?.user ? { id: session.user.id, email: session.user.email } : null);
     });
     return () => sub.subscription.unsubscribe();
-  }, [supabase.auth]);
+  }, [supabase.auth, router]);
 
   useEffect(() => {
     if (searchParams.get("pendingUpload") === "1" && user) {

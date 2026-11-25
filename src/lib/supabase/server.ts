@@ -40,13 +40,16 @@ export async function createClient() {
  */
 export async function createServiceClient() {
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL!;
+  // New Supabase dashboard: "Secret key" (sb_secret_...)
+  // Legacy dashboard: "service_role" JWT (eyJ...)
   const key =
+    process.env.SUPABASE_SECRET_KEY ||
     process.env.SUPABASE_SERVICE_ROLE_KEY ||
     process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!;
 
-  if (!process.env.SUPABASE_SERVICE_ROLE_KEY) {
+  if (!process.env.SUPABASE_SECRET_KEY && !process.env.SUPABASE_SERVICE_ROLE_KEY) {
     console.warn(
-      "[supabase] SUPABASE_SERVICE_ROLE_KEY is not set — inserts may fail under RLS. Add it in Vercel env."
+      "[supabase] SUPABASE_SECRET_KEY (or legacy SUPABASE_SERVICE_ROLE_KEY) is not set — inserts may fail under RLS."
     );
   }
 
