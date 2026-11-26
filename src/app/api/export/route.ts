@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { createClient, createServiceClient } from "@/lib/supabase/server";
+import { createClient } from "@/lib/supabase/server";
 import { getOrCreateGuestId } from "@/lib/guest";
 import { buildPdfBuffer } from "@/lib/export/pdf";
 import { buildPptxBuffer } from "@/lib/export/pptx";
@@ -35,9 +35,7 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    const service = await createServiceClient();
-
-    const { data: study, error: studyErr } = await service
+    const { data: study, error: studyErr } = await supabase
       .from("studies")
       .select("*")
       .eq("id", studyId)
@@ -47,7 +45,6 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "Study not found" }, { status: 404 });
     }
 
-    // AuthZ
     if (study.user_id) {
       if (!user || user.id !== study.user_id) {
         return NextResponse.json({ error: "Forbidden" }, { status: 403 });
@@ -92,59 +89,63 @@ export async function POST(req: NextRequest) {
 
     const contentType = CONTENT_TYPES[format];
     const ext = format;
-    const safeTitle = (study.title || "study")
-      .replace(/[^a-z0-9]+/gi, "-")
-      .slice(0, 40)
-      .toLowerCase() || "study";
+    const safeTitle =
+      (study.title || "study")
+        .replace(/[^a-z0-9]+/gi, "-")
+        .slice(0, 40)
+        .toLowerCase() || "study";
 
-    // Record export job (best-effort)
     let jobId: string | null = null;
-    try {
-      const { data: job } = await service
-        .from("exports")
-        .insert({
-          study_id: studyId,
-          user_id: user?.id ?? null,
-          format,
-          status: "processing",
-        })
-        .select("id")
-        .single();
-      jobId = job?.id ?? null;
-    } catch (jobErr) {
-      console.warn("export job insert skipped", jobErr);
+    if (user) {
+      try {
+        const { data: job } = await supabase
+          .from("exports")
+          .insert({
+            study_id: studyId,
+            user_id: user.id,
+            format,
+            status: "processing",
+          })
+          .select("id")
+          .single();
+        jobId = job?.id ?? null;
+      } catch (jobErr) {
+        console.warn("export job insert skipped", jobErr);
+      }
     }
 
     const storagePath = `${user?.id || "guest"}/${studyId}/${jobId || crypto.randomUUID()}-${safeTitle}.${ext}`;
 
     let signedUrl: string | null = null;
-    try {
-      const { error: upErr } = await service.storage
-        .from("exports")
-        .upload(storagePath, buffer, {
-          contentType,
-          upsert: true,
-        });
-
-      if (!upErr) {
-        const { data: signed } = await service.storage
+    if (user) {
+      try {
+        const { error: upErr } = await supabase.storage
           .from("exports")
-          .createSignedUrl(storagePath, 60 * 60 * 24 * 7);
-        signedUrl = signed?.signedUrl ?? null;
-      } else {
-        console.warn("storage upload error", upErr.message);
+          .upload(storagePath, buffer, {
+            contentType,
+            upsert: true,
+          });
+
+        if (!upErr) {
+          const { data: signed } = await supabase.storage
+            .from("exports")
+            .createSignedUrl(storagePath, 60 * 60 * 24 * 7);
+          signedUrl = signed?.signedUrl ?? null;
+        } else {
+          console.warn("storage upload error", upErr.message);
+        }
+      } catch (stErr) {
+        console.warn("storage skipped", stErr);
       }
-    } catch (stErr) {
-      console.warn("storage skipped", stErr);
     }
 
-    // Always have a usable download if storage is missing
+    // Always provide a downloadable URL (base64 fallback works without storage/secret key)
     if (!signedUrl) {
       signedUrl = `data:${contentType};base64,${buffer.toString("base64")}`;
     }
 
-    if (jobId) {
-      await service
+    if (jobId && user) {
+      await supabase
         .from("exports")
         .update({
           status: "ready",
@@ -168,8 +169,7 @@ export async function POST(req: NextRequest) {
     console.error("export error", err);
     return NextResponse.json(
       {
-        error:
-          err instanceof Error ? err.message : "Export failed",
+        error: err instanceof Error ? err.message : "Export failed",
       },
       { status: 500 }
     );

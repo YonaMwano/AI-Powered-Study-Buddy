@@ -1,7 +1,7 @@
 -- StudyBuddy AI - Full PostgreSQL Schema for Supabase
--- Run this in Supabase SQL Editor
+-- Works with publishable (anon) key only — no secret/service_role key required.
+-- Run this in Supabase SQL Editor (can re-run safely).
 
--- Enable required extensions
 CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
 CREATE EXTENSION IF NOT EXISTS "pgcrypto";
 
@@ -19,19 +19,17 @@ CREATE TABLE IF NOT EXISTS public.profiles (
 
 ALTER TABLE public.profiles ENABLE ROW LEVEL SECURITY;
 
+DROP POLICY IF EXISTS "Users can view own profile" ON public.profiles;
+DROP POLICY IF EXISTS "Users can update own profile" ON public.profiles;
+DROP POLICY IF EXISTS "Users can insert own profile" ON public.profiles;
+
 CREATE POLICY "Users can view own profile"
-  ON public.profiles FOR SELECT
-  USING (auth.uid() = id);
-
+  ON public.profiles FOR SELECT USING (auth.uid() = id);
 CREATE POLICY "Users can update own profile"
-  ON public.profiles FOR UPDATE
-  USING (auth.uid() = id);
-
+  ON public.profiles FOR UPDATE USING (auth.uid() = id);
 CREATE POLICY "Users can insert own profile"
-  ON public.profiles FOR INSERT
-  WITH CHECK (auth.uid() = id);
+  ON public.profiles FOR INSERT WITH CHECK (auth.uid() = id);
 
--- Auto-create profile on signup
 CREATE OR REPLACE FUNCTION public.handle_new_user()
 RETURNS TRIGGER AS $$
 BEGIN
@@ -40,7 +38,8 @@ BEGIN
     NEW.id,
     COALESCE(NEW.raw_user_meta_data->>'full_name', NEW.raw_user_meta_data->>'name', split_part(NEW.email, '@', 1)),
     NEW.raw_user_meta_data->>'avatar_url'
-  );
+  )
+  ON CONFLICT (id) DO NOTHING;
   RETURN NEW;
 END;
 $$ LANGUAGE plpgsql SECURITY DEFINER;
@@ -51,7 +50,7 @@ CREATE TRIGGER on_auth_user_created
   FOR EACH ROW EXECUTE FUNCTION public.handle_new_user();
 
 -- ============================================================
--- DOCUMENTS (raw input)
+-- DOCUMENTS
 -- ============================================================
 CREATE TABLE IF NOT EXISTS public.documents (
   id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
@@ -73,24 +72,35 @@ CREATE INDEX IF NOT EXISTS idx_documents_created_at ON public.documents(created_
 
 ALTER TABLE public.documents ENABLE ROW LEVEL SECURITY;
 
+DROP POLICY IF EXISTS "Users can view own documents" ON public.documents;
+DROP POLICY IF EXISTS "Users can insert own documents" ON public.documents;
+DROP POLICY IF EXISTS "Users can update own documents" ON public.documents;
+DROP POLICY IF EXISTS "Users can delete own documents" ON public.documents;
+DROP POLICY IF EXISTS "Guests can update guest documents" ON public.documents;
+
+-- Authenticated: own rows. Anon/guest: rows with user_id NULL (guest paste flow)
 CREATE POLICY "Users can view own documents"
   ON public.documents FOR SELECT
-  USING (auth.uid() = user_id OR (user_id IS NULL AND guest_id IS NOT NULL));
+  USING (auth.uid() = user_id OR user_id IS NULL);
 
 CREATE POLICY "Users can insert own documents"
   ON public.documents FOR INSERT
-  WITH CHECK (auth.uid() = user_id OR user_id IS NULL);
+  WITH CHECK (
+    (auth.uid() IS NOT NULL AND auth.uid() = user_id)
+    OR (auth.uid() IS NULL AND user_id IS NULL)
+    OR (auth.uid() IS NOT NULL AND user_id IS NULL)
+  );
 
 CREATE POLICY "Users can update own documents"
   ON public.documents FOR UPDATE
-  USING (auth.uid() = user_id);
+  USING (auth.uid() = user_id OR user_id IS NULL);
 
 CREATE POLICY "Users can delete own documents"
   ON public.documents FOR DELETE
   USING (auth.uid() = user_id);
 
 -- ============================================================
--- STUDIES (AI output)
+-- STUDIES
 -- ============================================================
 CREATE TABLE IF NOT EXISTS public.studies (
   id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
@@ -119,13 +129,21 @@ CREATE INDEX IF NOT EXISTS idx_studies_document_id ON public.studies(document_id
 
 ALTER TABLE public.studies ENABLE ROW LEVEL SECURITY;
 
+DROP POLICY IF EXISTS "Users can view own studies" ON public.studies;
+DROP POLICY IF EXISTS "Users can insert own studies" ON public.studies;
+DROP POLICY IF EXISTS "Users can update own studies" ON public.studies;
+DROP POLICY IF EXISTS "Users can delete own studies" ON public.studies;
+
 CREATE POLICY "Users can view own studies"
   ON public.studies FOR SELECT
-  USING (auth.uid() = user_id OR (user_id IS NULL AND guest_id IS NOT NULL));
+  USING (auth.uid() = user_id OR user_id IS NULL);
 
 CREATE POLICY "Users can insert own studies"
   ON public.studies FOR INSERT
-  WITH CHECK (auth.uid() = user_id OR user_id IS NULL);
+  WITH CHECK (
+    (auth.uid() IS NOT NULL AND auth.uid() = user_id)
+    OR (user_id IS NULL)
+  );
 
 CREATE POLICY "Users can update own studies"
   ON public.studies FOR UPDATE
@@ -136,7 +154,7 @@ CREATE POLICY "Users can delete own studies"
   USING (auth.uid() = user_id);
 
 -- ============================================================
--- EXPORTS
+-- EXPORTS (signed-in users only for persistence)
 -- ============================================================
 CREATE TABLE IF NOT EXISTS public.exports (
   id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
@@ -154,57 +172,22 @@ CREATE TABLE IF NOT EXISTS public.exports (
 
 CREATE INDEX IF NOT EXISTS idx_exports_study_id ON public.exports(study_id);
 CREATE INDEX IF NOT EXISTS idx_exports_user_id ON public.exports(user_id);
-CREATE INDEX IF NOT EXISTS idx_exports_status ON public.exports(status);
 
 ALTER TABLE public.exports ENABLE ROW LEVEL SECURITY;
 
+DROP POLICY IF EXISTS "Users can view own exports" ON public.exports;
+DROP POLICY IF EXISTS "Users can insert own exports" ON public.exports;
+DROP POLICY IF EXISTS "Users can update own exports" ON public.exports;
+
 CREATE POLICY "Users can view own exports"
-  ON public.exports FOR SELECT
-  USING (auth.uid() = user_id);
-
+  ON public.exports FOR SELECT USING (auth.uid() = user_id);
 CREATE POLICY "Users can insert own exports"
-  ON public.exports FOR INSERT
-  WITH CHECK (auth.uid() = user_id);
-
+  ON public.exports FOR INSERT WITH CHECK (auth.uid() = user_id);
 CREATE POLICY "Users can update own exports"
-  ON public.exports FOR UPDATE
-  USING (auth.uid() = user_id);
+  ON public.exports FOR UPDATE USING (auth.uid() = user_id);
 
 -- ============================================================
--- GUEST RATE LIMITING (simple)
--- ============================================================
-CREATE TABLE IF NOT EXISTS public.guest_usage (
-  guest_id TEXT PRIMARY KEY,
-  generation_count INTEGER DEFAULT 0,
-  last_generation_at TIMESTAMPTZ,
-  created_at TIMESTAMPTZ DEFAULT NOW() NOT NULL
-);
-
-ALTER TABLE public.guest_usage ENABLE ROW LEVEL SECURITY;
-
--- Service role only for guest_usage (no public policies)
-
--- ============================================================
--- STORAGE BUCKETS (run in Supabase dashboard or via API)
--- ============================================================
--- INSERT INTO storage.buckets (id, name, public) VALUES ('documents', 'documents', false);
--- INSERT INTO storage.buckets (id, name, public) VALUES ('exports', 'exports', false);
--- INSERT INTO storage.buckets (id, name, public) VALUES ('illustrations', 'illustrations', true);
-
--- Storage policies example (adjust as needed):
--- CREATE POLICY "Users can upload own documents"
---   ON storage.objects FOR INSERT
---   WITH CHECK (bucket_id = 'documents' AND auth.uid()::text = (storage.foldername(name))[1]);
-
--- ============================================================
--- CLEANUP CRON (optional - use pg_cron or external)
--- ============================================================
--- DELETE FROM public.documents WHERE user_id IS NULL AND created_at < NOW() - INTERVAL '24 hours';
--- DELETE FROM public.studies WHERE user_id IS NULL AND created_at < NOW() - INTERVAL '24 hours';
--- DELETE FROM public.exports WHERE expires_at < NOW();
-
--- ============================================================
--- UPDATED_AT TRIGGER
+-- UPDATED_AT
 -- ============================================================
 CREATE OR REPLACE FUNCTION public.set_updated_at()
 RETURNS TRIGGER AS $$
@@ -225,7 +208,7 @@ CREATE TRIGGER set_profiles_updated_at
   FOR EACH ROW EXECUTE FUNCTION public.set_updated_at();
 
 -- ============================================================
--- STORAGE BUCKETS (run once in SQL editor if not created)
+-- STORAGE BUCKETS
 -- ============================================================
 INSERT INTO storage.buckets (id, name, public)
 VALUES
@@ -234,28 +217,28 @@ VALUES
   ('illustrations', 'illustrations', true)
 ON CONFLICT (id) DO NOTHING;
 
--- Allow authenticated users to upload to their own folder
-CREATE POLICY IF NOT EXISTS "auth upload documents"
+DROP POLICY IF EXISTS "auth upload documents" ON storage.objects;
+DROP POLICY IF EXISTS "auth read documents" ON storage.objects;
+DROP POLICY IF EXISTS "auth upload exports" ON storage.objects;
+DROP POLICY IF EXISTS "auth read exports" ON storage.objects;
+DROP POLICY IF EXISTS "public read illustrations" ON storage.objects;
+
+CREATE POLICY "auth upload documents"
   ON storage.objects FOR INSERT TO authenticated
   WITH CHECK (bucket_id = 'documents' AND (storage.foldername(name))[1] = auth.uid()::text);
 
-CREATE POLICY IF NOT EXISTS "auth read documents"
+CREATE POLICY "auth read documents"
   ON storage.objects FOR SELECT TO authenticated
   USING (bucket_id = 'documents' AND (storage.foldername(name))[1] = auth.uid()::text);
 
-CREATE POLICY IF NOT EXISTS "auth upload exports"
+CREATE POLICY "auth upload exports"
   ON storage.objects FOR INSERT TO authenticated
   WITH CHECK (bucket_id = 'exports' AND (storage.foldername(name))[1] = auth.uid()::text);
 
-CREATE POLICY IF NOT EXISTS "auth read exports"
+CREATE POLICY "auth read exports"
   ON storage.objects FOR SELECT TO authenticated
   USING (bucket_id = 'exports' AND (storage.foldername(name))[1] = auth.uid()::text);
 
--- Public read for illustration images
-CREATE POLICY IF NOT EXISTS "public read illustrations"
+CREATE POLICY "public read illustrations"
   ON storage.objects FOR SELECT TO public
   USING (bucket_id = 'illustrations');
-
-CREATE POLICY IF NOT EXISTS "auth upload illustrations"
-  ON storage.objects FOR INSERT TO authenticated
-  WITH CHECK (bucket_id = 'illustrations');

@@ -1,7 +1,10 @@
 import { createServerClient } from "@supabase/ssr";
-import { createClient as createSupabaseJsClient } from "@supabase/supabase-js";
 import { cookies } from "next/headers";
 
+/**
+ * Server Supabase client using ONLY the publishable (anon) key + user session cookies.
+ * No secret / service_role key required — RLS enforces access.
+ */
 export async function createClient() {
   const cookieStore = await cookies();
 
@@ -31,32 +34,4 @@ export async function createClient() {
       },
     }
   );
-}
-
-/**
- * Service-role client. Bypasses RLS.
- * Required for guest writes and reliable server inserts.
- * Falls back to anon only if service key is missing (will fail RLS for user rows).
- */
-export async function createServiceClient() {
-  const url = process.env.NEXT_PUBLIC_SUPABASE_URL!;
-  // New Supabase dashboard: "Secret key" (sb_secret_...)
-  // Legacy dashboard: "service_role" JWT (eyJ...)
-  const key =
-    process.env.SUPABASE_SECRET_KEY ||
-    process.env.SUPABASE_SERVICE_ROLE_KEY ||
-    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!;
-
-  if (!process.env.SUPABASE_SECRET_KEY && !process.env.SUPABASE_SERVICE_ROLE_KEY) {
-    console.warn(
-      "[supabase] SUPABASE_SECRET_KEY (or legacy SUPABASE_SERVICE_ROLE_KEY) is not set — inserts may fail under RLS."
-    );
-  }
-
-  return createSupabaseJsClient(url, key, {
-    auth: {
-      persistSession: false,
-      autoRefreshToken: false,
-    },
-  });
 }

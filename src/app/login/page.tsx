@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useRouter, useSearchParams } from "next/navigation";
+import { useSearchParams } from "next/navigation";
 import { BookOpen, Mail, Loader2 } from "lucide-react";
 import { useState, Suspense } from "react";
 import { createClient } from "@/lib/supabase/client";
@@ -18,7 +18,6 @@ import {
 import { toast } from "sonner";
 
 function LoginForm() {
-  const router = useRouter();
   const searchParams = useSearchParams();
   const next = searchParams.get("next") || "/studio";
   const pendingUpload = searchParams.get("pendingUpload") === "1";

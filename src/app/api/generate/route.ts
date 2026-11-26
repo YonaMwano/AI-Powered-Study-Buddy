@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { createClient, createServiceClient } from "@/lib/supabase/server";
+import { createClient } from "@/lib/supabase/server";
 import { generateStudyFromText } from "@/lib/ai/generate";
 import { attachIllustrations } from "@/lib/ai/illustrate";
 import {
@@ -46,19 +46,11 @@ export async function POST(req: NextRequest) {
       }
     }
 
-    // Prefer service role (bypasses RLS). Fall back to user client when logged in.
-    const service = await createServiceClient();
-    const writer = (process.env.SUPABASE_SECRET_KEY || process.env.SUPABASE_SERVICE_ROLE_KEY)
-      ? service
-      : user
-        ? supabase
-        : service;
-
     let sourceText = (directText || "").trim();
     let resolvedDocumentId = documentId || null;
 
     if (documentId) {
-      const { data: doc, error } = await service
+      const { data: doc, error } = await supabase
         .from("documents")
         .select("*")
         .eq("id", documentId)
@@ -105,7 +97,7 @@ export async function POST(req: NextRequest) {
       }
     }
 
-    const { data: row, error: insertErr } = await writer
+    const { data: row, error: insertErr } = await supabase
       .from("studies")
       .insert({
         document_id: resolvedDocumentId,
@@ -133,7 +125,7 @@ export async function POST(req: NextRequest) {
           error:
             insertErr?.message?.includes("row-level security") ||
             insertErr?.code === "42501"
-              ? "Failed to save study — set SUPABASE_SECRET_KEY (or SUPABASE_SERVICE_ROLE_KEY) in Vercel and run schema.sql"
+              ? "Failed to save study — re-run supabase/schema.sql so RLS allows inserts with the anon key"
               : "Failed to save study",
           detail: insertErr?.message,
         },

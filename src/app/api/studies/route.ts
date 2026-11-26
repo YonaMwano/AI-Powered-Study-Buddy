@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { createClient, createServiceClient } from "@/lib/supabase/server";
+import { createClient } from "@/lib/supabase/server";
 import { getOrCreateGuestId } from "@/lib/guest";
 
 export const runtime = "nodejs";
@@ -11,10 +11,8 @@ export async function GET() {
       data: { user },
     } = await supabase.auth.getUser();
 
-    const service = await createServiceClient();
-
     if (user) {
-      const { data, error } = await service
+      const { data, error } = await supabase
         .from("studies")
         .select(
           "id, title, difficulty, created_at, has_diagrams, document_id, documents(source_type, original_filename)"
@@ -25,14 +23,16 @@ export async function GET() {
 
       if (error) {
         console.error(error);
-        return NextResponse.json({ error: "Failed to load studies" }, { status: 500 });
+        return NextResponse.json(
+          { error: "Failed to load studies" },
+          { status: 500 }
+        );
       }
       return NextResponse.json({ studies: data ?? [] });
     }
 
-    // Guest: only current session guest studies
     const guestId = await getOrCreateGuestId();
-    const { data, error } = await service
+    const { data, error } = await supabase
       .from("studies")
       .select(
         "id, title, difficulty, created_at, has_diagrams, document_id, documents(source_type, original_filename)"
@@ -43,7 +43,10 @@ export async function GET() {
       .limit(10);
 
     if (error) {
-      return NextResponse.json({ error: "Failed to load studies" }, { status: 500 });
+      return NextResponse.json(
+        { error: "Failed to load studies" },
+        { status: 500 }
+      );
     }
     return NextResponse.json({ studies: data ?? [] });
   } catch (err) {

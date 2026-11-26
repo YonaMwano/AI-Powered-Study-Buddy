@@ -22,10 +22,9 @@ export async function GET(request: NextRequest) {
   if (pendingUpload === "1") {
     redirectUrl.searchParams.set("pendingUpload", "1");
   }
-  // Signal client that session was just established (optional UX)
   redirectUrl.searchParams.set("auth", "success");
 
-  let response = NextResponse.redirect(redirectUrl);
+  const response = NextResponse.redirect(redirectUrl);
 
   const supabase = createServerClient(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -43,13 +42,15 @@ export async function GET(request: NextRequest) {
           }[]
         ) {
           cookiesToSet.forEach(({ name, value, options }) => {
-            // Normalize options so the session sticks across navigations
             const opts = {
               ...options,
               path: options?.path ?? "/",
-              sameSite: (options?.sameSite as "lax" | "strict" | "none") ?? "lax",
-              // secure is required on HTTPS (Vercel)
-              secure: process.env.NODE_ENV === "production" ? true : options?.secure,
+              sameSite:
+                (options?.sameSite as "lax" | "strict" | "none") ?? "lax",
+              secure:
+                process.env.NODE_ENV === "production"
+                  ? true
+                  : options?.secure,
             };
             request.cookies.set(name, value);
             response.cookies.set(name, value, opts);
