@@ -6,40 +6,19 @@ const nextConfig: NextConfig = {
       bodySizeLimit: "25mb",
     },
   },
+  // Keep PDF/native-ish packages outside the webpack bundle so fonts & assets resolve
+  serverExternalPackages: [
+    "pdf-lib",
+    "@react-pdf/renderer",
+    "@react-pdf/pdfkit",
+    "pdfkit",
+    "fontkit",
+    "sharp",
+  ],
   images: {
     remotePatterns: [
-      {
-        protocol: "https",
-        hostname: "**.supabase.co",
-      },
-      {
-        protocol: "https",
-        hostname: "api.kie.ai",
-      },
+      { protocol: "https", hostname: "**" },
     ],
-  },
-  serverExternalPackages: [
-    "pdf-parse",
-    "pdfjs-dist",
-    "sharp",
-    "mammoth",
-    "canvas",
-  ],
-  webpack: (config, { isServer }) => {
-    if (isServer) {
-      config.externals = config.externals || [];
-      if (Array.isArray(config.externals)) {
-        config.externals.push("canvas");
-      }
-    } else {
-      config.resolve = config.resolve || {};
-      config.resolve.fallback = {
-        ...(config.resolve.fallback || {}),
-        canvas: false,
-        fs: false,
-      };
-    }
-    return config;
   },
 };
 

@@ -1,22 +1,23 @@
 "use client";
 
 import { useState } from "react";
-import { Download, FileText, Presentation, FileType, Loader2 } from "lucide-react";
+import {
+  Download,
+  FileText,
+  Presentation,
+  FileType,
+  Loader2,
+} from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
   DialogContent,
+  DialogDescription,
   DialogHeader,
   DialogTitle,
-  DialogDescription,
 } from "@/components/ui/dialog";
 import { toast } from "sonner";
 import type { ExportFormat } from "@/types";
-
-interface ExportMenuProps {
-  studyId: string;
-  title: string;
-}
 
 const FORMATS: {
   id: ExportFormat;
@@ -27,24 +28,42 @@ const FORMATS: {
   {
     id: "pdf",
     label: "PDF",
-    description: "Printable document with clean page breaks",
+    description: "Printable study packet",
     icon: <FileText className="h-5 w-5" />,
+  },
+  {
+    id: "docx",
+    label: "Word (DOCX)",
+    description: "Editable document",
+    icon: <FileType className="h-5 w-5" />,
   },
   {
     id: "pptx",
     label: "PowerPoint",
-    description: "Slides for teaching or review",
+    description: "Slides for review",
     icon: <Presentation className="h-5 w-5" />,
-  },
-  {
-    id: "docx",
-    label: "Word",
-    description: "Editable document for notes",
-    icon: <FileType className="h-5 w-5" />,
   },
 ];
 
-export function ExportMenu({ studyId, title }: ExportMenuProps) {
+function saveBlob(blob: Blob, filename: string) {
+  const objectUrl = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = objectUrl;
+  a.download = filename;
+  a.rel = "noopener";
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  setTimeout(() => URL.revokeObjectURL(objectUrl), 60_000);
+}
+
+export function ExportMenu({
+  studyId,
+  title,
+}: {
+  studyId: string;
+  title: string;
+}) {
   const [open, setOpen] = useState(false);
   const [loading, setLoading] = useState<ExportFormat | null>(null);
 
@@ -54,29 +73,52 @@ export function ExportMenu({ studyId, title }: ExportMenuProps) {
       const res = await fetch("/api/export", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
+        credentials: "include",
         body: JSON.stringify({ studyId, format }),
       });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error || "Export failed");
 
-      const url = data.signedUrl as string;
+      const contentType = res.headers.get("content-type") || "";
+
+      if (!res.ok) {
+        let message = `Export failed (${res.status})`;
+        if (contentType.includes("application/json")) {
+          try {
+            const data = await res.json();
+            message = data.error || message;
+          } catch {
+            /* keep default */
+          }
+        }
+        throw new Error(message);
+      }
+
+      // Binary success
+      const blob = await res.blob();
+      if (blob.size < 20) throw new Error("Export produced an empty file");
+
+      // Guard: if server mistakenly returned JSON error as blob
+      if (contentType.includes("application/json")) {
+        const text = await blob.text();
+        try {
+          const data = JSON.parse(text);
+          throw new Error(data.error || "Export failed");
+        } catch (e) {
+          if (e instanceof Error && e.message !== "Export failed") throw e;
+          throw new Error("Export failed");
+        }
+      }
+
       const filename =
-        data.filename ||
-        `${title.replace(/[^a-z0-9]+/gi, "-").slice(0, 40)}.${format}`;
+        res.headers
+          .get("content-disposition")
+          ?.match(/filename="?([^";]+)"?/)?.[1] ||
+        `${(title || "study").replace(/[^a-z0-9]+/gi, "-").slice(0, 40)}.${format}`;
 
-      // Trigger download
-      const a = document.createElement("a");
-      a.href = url;
-      a.download = filename;
-      a.target = "_blank";
-      a.rel = "noopener";
-      document.body.appendChild(a);
-      a.click();
-      a.remove();
-
-      toast.success(`${format.toUpperCase()} ready`);
+      saveBlob(blob, filename);
+      toast.success(`${format.toUpperCase()} downloaded`);
       setOpen(false);
     } catch (err) {
+      console.error(err);
       toast.error(err instanceof Error ? err.message : "Export failed");
     } finally {
       setLoading(null);
@@ -95,7 +137,7 @@ export function ExportMenu({ studyId, title }: ExportMenuProps) {
           <DialogHeader>
             <DialogTitle>Export study</DialogTitle>
             <DialogDescription>
-              Server-rendered documents — no markdown leakage.
+              Download a clean PDF, Word, or PowerPoint file.
             </DialogDescription>
           </DialogHeader>
           <div className="space-y-2 py-2">

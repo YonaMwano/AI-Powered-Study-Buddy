@@ -22,7 +22,6 @@ const INK = rgb(0.06, 0.09, 0.16);
 const MUTED = rgb(0.39, 0.45, 0.55);
 const ACCENT = rgb(0.39, 0.4, 0.95);
 const SUCCESS = rgb(0.06, 0.73, 0.51);
-const KEY_BG = rgb(0.95, 0.96, 0.98);
 
 /** Strip / replace characters pdf-lib Helvetica cannot encode (WinAnsi). */
 function safeText(input: unknown): string {
