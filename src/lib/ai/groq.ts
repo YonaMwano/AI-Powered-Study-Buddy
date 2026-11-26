@@ -1,14 +1,18 @@
 const GROQ_API = "https://api.groq.com/openai/v1/chat/completions";
 
 export type GroqModel =
+  | "openai/gpt-oss-20b"
   | "openai/gpt-oss-120b"
   | "qwen/qwen3.8-27b"
   | "llama-3.3-70b-versatile"
-  | "llama-3.1-8b-instant";
+  | "llama-3.1-8b-instant"
+  | "meta-llama/llama-4-scout-17b-16e-instruct";
 
 interface ChatMessage {
   role: "system" | "user" | "assistant";
-  content: string | Array<{ type: string; text?: string; image_url?: { url: string } }>;
+  content:
+    | string
+    | Array<{ type: string; text?: string; image_url?: { url: string } }>;
 }
 
 interface GroqOptions {
@@ -21,7 +25,11 @@ interface GroqOptions {
 
 export async function callGroq(options: GroqOptions): Promise<{
   content: string;
-  usage: { prompt_tokens: number; completion_tokens: number; total_tokens: number };
+  usage: {
+    prompt_tokens: number;
+    completion_tokens: number;
+    total_tokens: number;
+  };
 }> {
   const key = process.env.GROQ_API_KEY;
   if (!key) {
@@ -62,14 +70,18 @@ export async function callGroq(options: GroqOptions): Promise<{
 
 /**
  * Vision extraction for images / scanned pages.
- * Batches up to 3 images per request (Groq guidance).
+ * Batches up to 3 images per request.
  */
 export async function visionExtract(
-  images: string[], // data URLs or public URLs
+  images: string[],
   extraContext?: string
-): Promise<{ text: string; tables: string[]; headings: string[]; tokens: number }> {
-  const model = "qwen/qwen3.8-27b"; // as specified in design
-  // Fallback model if the specific one is unavailable
+): Promise<{
+  text: string;
+  tables: string[];
+  headings: string[];
+  tokens: number;
+}> {
+  const model = "meta-llama/llama-4-scout-17b-16e-instruct";
   const fallback = "llama-3.2-90b-vision-preview";
 
   const batches: string[][] = [];
@@ -83,7 +95,11 @@ export async function visionExtract(
   let totalTokens = 0;
 
   for (const batch of batches) {
-    const contentParts: Array<{ type: string; text?: string; image_url?: { url: string } }> = [
+    const contentParts: Array<{
+      type: string;
+      text?: string;
+      image_url?: { url: string };
+    }> = [
       {
         type: "text",
         text: `Extract all readable text, tables, dates, and headings from the provided image(s). 
@@ -119,9 +135,11 @@ ${extraContext ? `Context: ${extraContext}` : ""}`,
       totalTokens += usage.total_tokens;
 
       const parsed = JSON.parse(content);
-      if (parsed.text) combinedText += (combinedText ? "\n\n" : "") + parsed.text;
+      if (parsed.text)
+        combinedText += (combinedText ? "\n\n" : "") + parsed.text;
       if (Array.isArray(parsed.tables)) tables = tables.concat(parsed.tables);
-      if (Array.isArray(parsed.headings)) headings = headings.concat(parsed.headings);
+      if (Array.isArray(parsed.headings))
+        headings = headings.concat(parsed.headings);
     } catch (primaryErr) {
       console.warn("Primary vision model failed, trying fallback", primaryErr);
       try {
@@ -132,12 +150,14 @@ ${extraContext ? `Context: ${extraContext}` : ""}`,
           max_tokens: 4096,
         });
         totalTokens += usage.total_tokens;
-        // Try to parse or use raw
         try {
           const parsed = JSON.parse(content);
-          if (parsed.text) combinedText += (combinedText ? "\n\n" : "") + parsed.text;
-          if (Array.isArray(parsed.tables)) tables = tables.concat(parsed.tables);
-          if (Array.isArray(parsed.headings)) headings = headings.concat(parsed.headings);
+          if (parsed.text)
+            combinedText += (combinedText ? "\n\n" : "") + parsed.text;
+          if (Array.isArray(parsed.tables))
+            tables = tables.concat(parsed.tables);
+          if (Array.isArray(parsed.headings))
+            headings = headings.concat(parsed.headings);
         } catch {
           combinedText += (combinedText ? "\n\n" : "") + content;
         }
@@ -147,5 +167,10 @@ ${extraContext ? `Context: ${extraContext}` : ""}`,
     }
   }
 
-  return { text: combinedText.trim(), tables, headings, tokens: totalTokens };
+  return {
+    text: combinedText.trim(),
+    tables,
+    headings,
+    tokens: totalTokens,
+  };
 }
