@@ -80,7 +80,7 @@ export async function POST(req: NextRequest) {
       return NextResponse.json(
         {
           error:
-            "Not enough text to generate a study set. Paste more content or re-upload the file.",
+            "Not enough text to generate a study set. If you uploaded a PDF, it may be scanned (image-only) with no selectable text. Try a text PDF, paste the text, or use a Word file.",
           code: "NO_TEXT",
         },
         { status: 400 }

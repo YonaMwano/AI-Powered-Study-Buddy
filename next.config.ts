@@ -8,6 +8,8 @@ const nextConfig: NextConfig = {
   },
   // Keep PDF/native-ish packages outside the webpack bundle so fonts & assets resolve
   serverExternalPackages: [
+    "pdfjs-dist",
+    "pdf-parse",
     "pdf-lib",
     "@react-pdf/renderer",
     "@react-pdf/pdfkit",
