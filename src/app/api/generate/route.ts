@@ -46,34 +46,43 @@ export async function POST(req: NextRequest) {
       }
     }
 
+    // Prefer explicit text from client; fall back to document row
     let sourceText = (directText || "").trim();
     let resolvedDocumentId = documentId || null;
 
     if (documentId) {
       const { data: doc, error } = await supabase
         .from("documents")
-        .select("*")
+        .select("id, user_id, guest_id, extracted_text")
         .eq("id", documentId)
-        .single();
-      if (error || !doc) {
-        return NextResponse.json({ error: "Document not found" }, { status: 404 });
-      }
-      if (doc.user_id && user?.id !== doc.user_id) {
-        return NextResponse.json({ error: "Forbidden" }, { status: 403 });
-      }
-      if (!doc.user_id && doc.guest_id) {
-        const gid = await getOrCreateGuestId();
-        if (gid !== doc.guest_id) {
+        .maybeSingle();
+
+      if (doc) {
+        if (doc.user_id && user?.id !== doc.user_id) {
           return NextResponse.json({ error: "Forbidden" }, { status: 403 });
         }
+        if (!doc.user_id && doc.guest_id && guestId && doc.guest_id !== guestId) {
+          if (!sourceText) {
+            return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+          }
+        } else {
+          resolvedDocumentId = doc.id;
+          if (!sourceText) {
+            sourceText = (doc.extracted_text || "").trim();
+          }
+        }
+      } else if (error) {
+        console.warn("document lookup", error.message);
       }
-      sourceText = (doc.extracted_text || sourceText || "").trim();
-      resolvedDocumentId = doc.id;
     }
 
     if (!sourceText || sourceText.length < 20) {
       return NextResponse.json(
-        { error: "Not enough text to generate a study set" },
+        {
+          error:
+            "Not enough text to generate a study set. Paste more content or re-upload the file.",
+          code: "NO_TEXT",
+        },
         { status: 400 }
       );
     }
@@ -125,9 +134,10 @@ export async function POST(req: NextRequest) {
           error:
             insertErr?.message?.includes("row-level security") ||
             insertErr?.code === "42501"
-              ? "Failed to save study — re-run supabase/schema.sql so RLS allows inserts with the anon key"
+              ? "Failed to save study — run the studies RLS policies in SQL Editor"
               : "Failed to save study",
           detail: insertErr?.message,
+          code: "STUDY_INSERT_FAILED",
         },
         { status: 500 }
       );
