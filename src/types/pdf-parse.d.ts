@@ -13,3 +13,15 @@ declare module "pdf-parse" {
   ): Promise<PDFData>;
   export default pdfParse;
 }
+
+declare module "pdf-parse/lib/pdf-parse.js" {
+  interface PDFData {
+    numpages: number;
+    text: string;
+  }
+  function pdfParse(
+    dataBuffer: Buffer,
+    options?: Record<string, unknown>
+  ): Promise<PDFData>;
+  export default pdfParse;
+}

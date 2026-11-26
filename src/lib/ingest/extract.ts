@@ -92,12 +92,14 @@ async function extractWithPdfParse(buffer: Buffer): Promise<{
 }> {
   try {
     // Prefer deep import to avoid pdf-parse's debug test-file require
-    // eslint-disable-next-line @typescript-eslint/no-require-imports
-    const mod = await import("pdf-parse/lib/pdf-parse.js").catch(() => null);
-    const pdfParse =
-      (mod as { default?: (b: Buffer) => Promise<{ text: string; numpages: number }> })
-        ?.default ||
-      (await import("pdf-parse")).default;
+    let pdfParse: (b: Buffer) => Promise<{ text: string; numpages: number }>;
+    try {
+      const mod = await import("pdf-parse/lib/pdf-parse.js");
+      pdfParse = mod.default;
+    } catch {
+      const mod = await import("pdf-parse");
+      pdfParse = mod.default;
+    }
 
     const data = await pdfParse(buffer);
     return {
