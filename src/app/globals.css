@@ -126,3 +126,44 @@
   );
   background-size: 200% 100%;
 }
+
+
+/* ---- Full-page theme surfaces ---- */
+html {
+  color-scheme: light;
+}
+html.dark {
+  color-scheme: dark;
+}
+
+body {
+  background-color: var(--paper, #F7F6F3);
+  color: var(--ink, #0F172A);
+  min-height: 100vh;
+}
+
+html.dark body {
+  background-color: var(--paper, #0B0E14);
+  color: var(--ink, #E2E8F0);
+}
+
+/* Utility used on many pages */
+.paper {
+  background-color: var(--paper, #F7F6F3);
+  color: var(--ink, #0F172A);
+}
+html.dark .paper {
+  background-color: var(--paper, #0B0E14);
+  color: var(--ink, #E2E8F0);
+}
+
+/* Cards / dialogs that used pure white without dark variant */
+html.dark .bg-white {
+  background-color: #0f172a !important;
+}
+html.dark .bg-slate-50 {
+  background-color: #0f172a !important;
+}
+html.dark .bg-\[\#F7F6F3\] {
+  background-color: #0B0E14 !important;
+}

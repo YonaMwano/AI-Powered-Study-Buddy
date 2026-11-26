@@ -1,58 +1,64 @@
-import { createServiceClient } from "@/lib/supabase/server";
 import { cookies } from "next/headers";
 
 const GUEST_COOKIE = "guest_id";
+const GUEST_QUOTA_COOKIE = "guest_quota";
 const GUEST_MAX_GENERATIONS = 1;
 const GUEST_WINDOW_HOURS = 24;
 
+/** Cookie-only guest identity — no DB / secret key required */
 export async function getOrCreateGuestId(): Promise<string> {
   const cookieStore = await cookies();
   let guestId = cookieStore.get(GUEST_COOKIE)?.value;
 
   if (!guestId) {
     guestId = `guest_${crypto.randomUUID()}`;
-    cookieStore.set(GUEST_COOKIE, guestId, {
-      httpOnly: true,
-      secure: process.env.NODE_ENV === "production",
-      sameSite: "lax",
-      maxAge: 60 * 60 * 24 * 7, // 7 days
-      path: "/",
-    });
+    try {
+      cookieStore.set(GUEST_COOKIE, guestId, {
+        httpOnly: true,
+        secure: process.env.NODE_ENV === "production",
+        sameSite: "lax",
+        maxAge: 60 * 60 * 24 * 7,
+        path: "/",
+      });
+    } catch {
+      // ignore if cookies locked in RSC
+    }
   }
 
   return guestId;
 }
 
+type QuotaPayload = { count: number; at: number };
+
+function parseQuota(raw: string | undefined): QuotaPayload | null {
+  if (!raw) return null;
+  try {
+    const p = JSON.parse(raw) as QuotaPayload;
+    if (typeof p.count === "number" && typeof p.at === "number") return p;
+  } catch {
+    /* ignore */
+  }
+  return null;
+}
+
+/** Guest quota stored in httpOnly cookie (no guest_usage table / secret key) */
 export async function checkGuestQuota(guestId: string): Promise<{
   allowed: boolean;
   remaining: number;
   message?: string;
 }> {
+  void guestId;
   try {
-    const supabase = await createServiceClient();
-    const { data, error } = await supabase
-      .from("guest_usage")
-      .select("generation_count, last_generation_at")
-      .eq("guest_id", guestId)
-      .maybeSingle();
-
-    if (error) {
-      console.error("guest_usage select error", error);
-      // Fail open for availability, but log
-      return { allowed: true, remaining: GUEST_MAX_GENERATIONS };
-    }
-
+    const cookieStore = await cookies();
+    const data = parseQuota(cookieStore.get(GUEST_QUOTA_COOKIE)?.value);
     if (!data) {
       return { allowed: true, remaining: GUEST_MAX_GENERATIONS };
     }
 
-    const last = data.last_generation_at
-      ? new Date(data.last_generation_at)
-      : null;
     const windowMs = GUEST_WINDOW_HOURS * 60 * 60 * 1000;
-    const inWindow = last && Date.now() - last.getTime() < windowMs;
+    const inWindow = Date.now() - data.at < windowMs;
 
-    if (inWindow && data.generation_count >= GUEST_MAX_GENERATIONS) {
+    if (inWindow && data.count >= GUEST_MAX_GENERATIONS) {
       return {
         allowed: false,
         remaining: 0,
@@ -61,46 +67,38 @@ export async function checkGuestQuota(guestId: string): Promise<{
       };
     }
 
-    // Window expired → reset conceptually
     if (!inWindow) {
       return { allowed: true, remaining: GUEST_MAX_GENERATIONS };
     }
 
     return {
       allowed: true,
-      remaining: Math.max(0, GUEST_MAX_GENERATIONS - data.generation_count),
+      remaining: Math.max(0, GUEST_MAX_GENERATIONS - data.count),
     };
-  } catch (e) {
-    console.error("checkGuestQuota", e);
+  } catch {
     return { allowed: true, remaining: GUEST_MAX_GENERATIONS };
   }
 }
 
 export async function incrementGuestUsage(guestId: string): Promise<void> {
+  void guestId;
   try {
-    const supabase = await createServiceClient();
-    const { data } = await supabase
-      .from("guest_usage")
-      .select("generation_count, last_generation_at")
-      .eq("guest_id", guestId)
-      .maybeSingle();
-
-    const last = data?.last_generation_at
-      ? new Date(data.last_generation_at)
-      : null;
+    const cookieStore = await cookies();
+    const data = parseQuota(cookieStore.get(GUEST_QUOTA_COOKIE)?.value);
     const windowMs = GUEST_WINDOW_HOURS * 60 * 60 * 1000;
-    const inWindow = last && Date.now() - last.getTime() < windowMs;
+    const inWindow = data && Date.now() - data.at < windowMs;
+    const newCount = inWindow && data ? data.count + 1 : 1;
 
-    const newCount =
-      inWindow && data ? data.generation_count + 1 : 1;
-
-    await supabase.from("guest_usage").upsert(
+    cookieStore.set(
+      GUEST_QUOTA_COOKIE,
+      JSON.stringify({ count: newCount, at: Date.now() }),
       {
-        guest_id: guestId,
-        generation_count: newCount,
-        last_generation_at: new Date().toISOString(),
-      },
-      { onConflict: "guest_id" }
+        httpOnly: true,
+        secure: process.env.NODE_ENV === "production",
+        sameSite: "lax",
+        maxAge: 60 * 60 * 24 * 2,
+        path: "/",
+      }
     );
   } catch (e) {
     console.error("incrementGuestUsage", e);

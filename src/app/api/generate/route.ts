@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { createClient, createServiceClient } from "@/lib/supabase/server";
+import { createClient } from "@/lib/supabase/server";
 import { generateStudyFromText } from "@/lib/ai/generate";
 import { attachIllustrations } from "@/lib/ai/illustrate";
 import {
@@ -34,7 +34,6 @@ export async function POST(req: NextRequest) {
       includeFlashcardImages?: boolean;
     };
 
-    // Guest quota
     let guestId: string | null = null;
     if (!user) {
       guestId = await getOrCreateGuestId();
@@ -47,36 +46,47 @@ export async function POST(req: NextRequest) {
       }
     }
 
-    const service = await createServiceClient();
-
-    // Resolve source text
+    // Prefer explicit text from client; fall back to document row
     let sourceText = (directText || "").trim();
     let resolvedDocumentId = documentId || null;
 
     if (documentId) {
-      const { data: doc, error } = await service
+      const { data: doc, error } = await supabase
         .from("documents")
-        .select("*")
+        .select("id, user_id, guest_id, extracted_text")
         .eq("id", documentId)
-        .single();
-      if (error || !doc) {
-        return NextResponse.json({ error: "Document not found" }, { status: 404 });
+        .maybeSingle();
+
+      if (doc) {
+        if (doc.user_id && user?.id !== doc.user_id) {
+          return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+        }
+        if (!doc.user_id && doc.guest_id && guestId && doc.guest_id !== guestId) {
+          if (!sourceText) {
+            return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+          }
+        } else {
+          resolvedDocumentId = doc.id;
+          if (!sourceText) {
+            sourceText = (doc.extracted_text || "").trim();
+          }
+        }
+      } else if (error) {
+        console.warn("document lookup", error.message);
       }
-      if (doc.user_id && user?.id !== doc.user_id) {
-        return NextResponse.json({ error: "Forbidden" }, { status: 403 });
-      }
-      sourceText = (doc.extracted_text || sourceText || "").trim();
-      resolvedDocumentId = doc.id;
     }
 
     if (!sourceText || sourceText.length < 20) {
       return NextResponse.json(
-        { error: "Not enough text to generate a study set" },
+        {
+          error:
+            "Not enough text to generate a study set. Paste more content or re-upload the file.",
+          code: "NO_TEXT",
+        },
         { status: 400 }
       );
     }
 
-    // Generate
     const { study, model, tokensIn, tokensOut } = await generateStudyFromText({
       text: sourceText,
       difficulty,
@@ -84,7 +94,6 @@ export async function POST(req: NextRequest) {
       includeFlashcardImages: !!user && includeFlashcardImages,
     });
 
-    // Optional illustrations (signed-in only)
     let finalStudy = study;
     if (user && (includeDiagrams || includeFlashcardImages)) {
       try {
@@ -97,8 +106,7 @@ export async function POST(req: NextRequest) {
       }
     }
 
-    // Persist study
-    const { data: row, error: insertErr } = await service
+    const { data: row, error: insertErr } = await supabase
       .from("studies")
       .insert({
         document_id: resolvedDocumentId,
@@ -113,8 +121,8 @@ export async function POST(req: NextRequest) {
         model_vision: null,
         tokens_in: tokensIn,
         tokens_out: tokensOut,
-        has_diagrams: !!includeDiagrams && user,
-        has_flashcard_images: !!includeFlashcardImages && user,
+        has_diagrams: !!(includeDiagrams && user),
+        has_flashcard_images: !!(includeFlashcardImages && user),
       })
       .select("id, title")
       .single();
@@ -122,7 +130,15 @@ export async function POST(req: NextRequest) {
     if (insertErr || !row) {
       console.error("insert study", insertErr);
       return NextResponse.json(
-        { error: "Failed to save study" },
+        {
+          error:
+            insertErr?.message?.includes("row-level security") ||
+            insertErr?.code === "42501"
+              ? "Failed to save study — run the studies RLS policies in SQL Editor"
+              : "Failed to save study",
+          detail: insertErr?.message,
+          code: "STUDY_INSERT_FAILED",
+        },
         { status: 500 }
       );
     }

@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { createClient, createServiceClient } from "@/lib/supabase/server";
+import { createClient } from "@/lib/supabase/server";
 import { getOrCreateGuestId } from "@/lib/guest";
 import { buildPdfBuffer } from "@/lib/export/pdf";
 import { buildPptxBuffer } from "@/lib/export/pptx";
@@ -9,6 +9,12 @@ import type { ExportFormat, Study } from "@/types";
 export const runtime = "nodejs";
 export const maxDuration = 120;
 
+const CONTENT_TYPES: Record<ExportFormat, string> = {
+  pdf: "application/pdf",
+  docx: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+  pptx: "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+};
+
 export async function POST(req: NextRequest) {
   try {
     const supabase = await createClient();
@@ -17,30 +23,30 @@ export async function POST(req: NextRequest) {
     } = await supabase.auth.getUser();
 
     const body = await req.json();
-    const { studyId, format } = body as {
+    const { studyId, format, delivery } = body as {
       studyId?: string;
       format?: ExportFormat;
+      /** "binary" = file bytes in response body (recommended). "json" = base64 URL. */
+      delivery?: "binary" | "json";
     };
 
-    if (!studyId || !format || !["pdf", "pptx", "docx"].includes(format)) {
+    if (!studyId || !format || !["pdf", "docx", "pptx"].includes(format)) {
       return NextResponse.json(
-        { error: "studyId and format (pdf|pptx|docx) required" },
+        { error: "studyId and format (pdf|docx|pptx) required" },
         { status: 400 }
       );
     }
 
-    const service = await createServiceClient();
-    const { data: study, error } = await service
+    const { data: study, error: studyErr } = await supabase
       .from("studies")
       .select("*")
       .eq("id", studyId)
       .single();
 
-    if (error || !study) {
+    if (studyErr || !study) {
       return NextResponse.json({ error: "Study not found" }, { status: 404 });
     }
 
-    // AuthZ
     if (study.user_id) {
       if (!user || user.id !== study.user_id) {
         return NextResponse.json({ error: "Forbidden" }, { status: 403 });
@@ -52,115 +58,72 @@ export async function POST(req: NextRequest) {
       }
     }
 
-    // Create export job row
-    const { data: job, error: jobErr } = await service
-      .from("exports")
-      .insert({
-        study_id: studyId,
-        user_id: user?.id ?? null,
-        format,
-        status: "processing",
-      })
-      .select("id")
-      .single();
+    const studyPayload = study as unknown as Study;
 
-    if (jobErr || !job) {
-      console.error(jobErr);
-      return NextResponse.json({ error: "Failed to create export job" }, { status: 500 });
-    }
-
-    // Build document
     let buffer: Buffer;
-    let contentType: string;
-    let ext: string;
-
     try {
       if (format === "pdf") {
-        buffer = await buildPdfBuffer(study as Study);
-        contentType = "application/pdf";
-        ext = "pdf";
-      } else if (format === "pptx") {
-        buffer = await buildPptxBuffer(study as Study);
-        contentType =
-          "application/vnd.openxmlformats-officedocument.presentationml.presentation";
-        ext = "pptx";
+        buffer = await buildPdfBuffer(studyPayload);
+      } else if (format === "docx") {
+        buffer = await buildDocxBuffer(studyPayload);
       } else {
-        buffer = await buildDocxBuffer(study as Study);
-        contentType =
-          "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
-        ext = "docx";
+        buffer = await buildPptxBuffer(studyPayload);
       }
     } catch (buildErr) {
       console.error("export build failed", buildErr);
-      await service
-        .from("exports")
-        .update({
-          status: "failed",
-          error_message: buildErr instanceof Error ? buildErr.message : "Build failed",
-        })
-        .eq("id", job.id);
       return NextResponse.json(
-        { error: "Document generation failed" },
+        {
+          error:
+            buildErr instanceof Error
+              ? `Build failed: ${buildErr.message}`
+              : "Failed to build document",
+        },
         { status: 500 }
       );
     }
 
-    // Upload to storage
-    const safeTitle = (study.title || "study")
-      .replace(/[^a-z0-9]+/gi, "-")
-      .slice(0, 40)
-      .toLowerCase();
-    const storagePath = `${user?.id || "guest"}/${studyId}/${job.id}-${safeTitle}.${ext}`;
-
-    let signedUrl: string | null = null;
-    try {
-      const { error: upErr } = await service.storage
-        .from("exports")
-        .upload(storagePath, buffer, {
-          contentType,
-          upsert: true,
-        });
-      if (!upErr) {
-        const { data: signed } = await service.storage
-          .from("exports")
-          .createSignedUrl(storagePath, 60 * 60 * 24 * 7);
-        signedUrl = signed?.signedUrl ?? null;
-      } else {
-        console.warn("storage upload error", upErr);
-      }
-    } catch (stErr) {
-      console.warn("storage skipped", stErr);
+    if (!buffer || buffer.length < 32) {
+      return NextResponse.json(
+        { error: "Export produced an empty file" },
+        { status: 500 }
+      );
     }
 
-    // Fallback: return base64 data URL if storage unavailable
-    if (!signedUrl) {
-      const b64 = buffer.toString("base64");
-      signedUrl = `data:${contentType};base64,${b64}`;
+    const contentType = CONTENT_TYPES[format];
+    const safeTitle =
+      (study.title || "study")
+        .replace(/[^a-z0-9]+/gi, "-")
+        .slice(0, 40)
+        .toLowerCase() || "study";
+    const filename = `${safeTitle}.${format}`;
+
+    // Preferred path: stream file bytes (reliable downloads, no huge JSON)
+    if (delivery !== "json") {
+      return new NextResponse(new Uint8Array(buffer), {
+        status: 200,
+        headers: {
+          "Content-Type": contentType,
+          "Content-Disposition": `attachment; filename="${filename}"`,
+          "Content-Length": String(buffer.length),
+          "Cache-Control": "no-store",
+        },
+      });
     }
 
-    await service
-      .from("exports")
-      .update({
-        status: "ready",
-        file_url: signedUrl.startsWith("data:") ? null : signedUrl,
-        storage_path: storagePath,
-        bytes: buffer.length,
-      })
-      .eq("id", job.id);
-
+    // Optional JSON + data URL (legacy / debugging)
     return NextResponse.json({
-      jobId: job.id,
       status: "ready",
-      signedUrl,
+      signedUrl: `data:${contentType};base64,${buffer.toString("base64")}`,
       bytes: buffer.length,
-      expiresIn: 7 * 24 * 3600,
-      filename: `${safeTitle}.${ext}`,
+      filename,
       contentType,
     });
   } catch (err) {
     console.error("export error", err);
     return NextResponse.json(
-      { error: "Export failed" },
+      {
+        error: err instanceof Error ? err.message : "Export failed",
+      },
       { status: 500 }
     );
   }

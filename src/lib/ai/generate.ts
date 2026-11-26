@@ -66,6 +66,10 @@ Return JSON with this exact shape:
 }`;
 }
 
+/** Primary text model (Groq). Fallback if primary is unavailable. */
+const PRIMARY_MODEL = "openai/gpt-oss-20b";
+const FALLBACK_MODEL = "openai/gpt-oss-120b";
+
 export async function generateStudyFromText(options: {
   text: string;
   difficulty: Difficulty;
@@ -77,9 +81,6 @@ export async function generateStudyFromText(options: {
   tokensIn: number;
   tokensOut: number;
 }> {
-  const model = "openai/gpt-oss-120b";
-  const fallback = "llama-3.3-70b-versatile";
-
   const messages = [
     { role: "system" as const, content: SYSTEM_PROMPT },
     {
@@ -96,11 +97,11 @@ export async function generateStudyFromText(options: {
   let content = "";
   let tokensIn = 0;
   let tokensOut = 0;
-  let usedModel = model;
+  let usedModel = PRIMARY_MODEL;
 
   try {
     const result = await callGroq({
-      model,
+      model: PRIMARY_MODEL,
       messages,
       temperature: 0.3,
       max_tokens: 4096,
@@ -111,9 +112,9 @@ export async function generateStudyFromText(options: {
     tokensOut = result.usage.completion_tokens;
   } catch (err) {
     console.warn("Primary text model failed, using fallback", err);
-    usedModel = fallback;
+    usedModel = FALLBACK_MODEL;
     const result = await callGroq({
-      model: fallback,
+      model: FALLBACK_MODEL,
       messages,
       temperature: 0.3,
       max_tokens: 4096,
@@ -128,7 +129,6 @@ export async function generateStudyFromText(options: {
   try {
     parsed = JSON.parse(content);
   } catch {
-    // Repair attempt
     const repair = await callGroq({
       model: usedModel,
       messages: [
@@ -149,12 +149,10 @@ export async function generateStudyFromText(options: {
     parsed = JSON.parse(content);
   }
 
-  // Sanitize then validate
   let sanitized = sanitizeStudyPayload(parsed);
   const first = StudyGenerationSchema.safeParse(sanitized);
 
   if (!first.success) {
-    // One repair round with Zod errors
     const repair = await callGroq({
       model: usedModel,
       messages: [
@@ -174,13 +172,20 @@ export async function generateStudyFromText(options: {
     sanitized = sanitizeStudyPayload(repairedParsed);
     const second = StudyGenerationSchema.safeParse(sanitized);
     if (!second.success) {
-      // Soft accept sanitized payload so user still gets something
-      console.warn("Zod still failed after repair, using sanitized best-effort");
+      throw new Error(
+        `Study generation failed validation: ${second.error.message}`
+      );
     }
+    return {
+      study: second.data,
+      model: usedModel,
+      tokensIn,
+      tokensOut,
+    };
   }
 
   return {
-    study: sanitized as StudyGeneration,
+    study: first.data,
     model: usedModel,
     tokensIn,
     tokensOut,

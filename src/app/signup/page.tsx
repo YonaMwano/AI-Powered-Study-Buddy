@@ -68,7 +68,7 @@ export default function SignupPage() {
   }
 
   return (
-    <div className="flex min-h-screen">
+    <div className="paper flex min-h-screen">
       <div className="flex w-full flex-col justify-center px-4 py-12 sm:px-6 lg:w-1/2 lg:px-12">
         <div className="mx-auto w-full max-w-md">
           <Link href="/" className="mb-8 flex items-center gap-2 font-semibold text-slate-900 dark:text-slate-50">
@@ -101,7 +101,7 @@ export default function SignupPage() {
                   <span className="w-full border-t border-slate-200 dark:border-slate-700" />
                 </div>
                 <div className="relative flex justify-center text-xs uppercase">
-                  <span className="bg-white px-2 text-slate-500 dark:bg-slate-950 dark:text-slate-400">or</span>
+                  <span className="bg-[var(--paper)] px-2 text-slate-500 dark:text-slate-400">or</span>
                 </div>
               </div>
 

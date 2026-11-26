@@ -57,14 +57,27 @@ function StudioInner() {
   const supabase = createClient();
 
   useEffect(() => {
-    supabase.auth.getUser().then(({ data }) => {
-      if (data.user) setUser({ id: data.user.id, email: data.user.email });
-    });
+    // After Google OAuth, session may land a tick later — refresh until ready
+    const sync = async () => {
+      const { data } = await supabase.auth.getSession();
+      if (data.session?.user) {
+        setUser({ id: data.session.user.id, email: data.session.user.email });
+      }
+    };
+    sync();
+    if (typeof window !== "undefined" && new URLSearchParams(window.location.search).get("auth") === "success") {
+      const url = new URL(window.location.href);
+      url.searchParams.delete("auth");
+      window.history.replaceState({}, "", url.pathname + url.search);
+      // Ensure server components see the session
+      router.refresh();
+      toast.success("Signed in");
+    }
     const { data: sub } = supabase.auth.onAuthStateChange((_e, session) => {
       setUser(session?.user ? { id: session.user.id, email: session.user.email } : null);
     });
     return () => sub.subscription.unsubscribe();
-  }, [supabase.auth]);
+  }, [supabase.auth, router]);
 
   useEffect(() => {
     if (searchParams.get("pendingUpload") === "1" && user) {
@@ -135,9 +148,23 @@ function StudioInner() {
     const form = new FormData();
     form.append("text", text.trim());
     const res = await fetch("/api/ingest", { method: "POST", body: form });
-    const data = await res.json();
-    if (!res.ok) throw new Error(data.error || "Failed to save text");
-    return data.documentId as string;
+    let data: { error?: string; detail?: string; documentId?: string } = {};
+    try {
+      data = await res.json();
+    } catch {
+      /* ignore */
+    }
+    if (!res.ok) {
+      // Document may still have been written; do not hard-block generation
+      const msg = [data.error, data.detail].filter(Boolean).join(" — ");
+      console.warn("ingest warning", msg);
+      // Return null so onGenerate can still run with raw text
+      if (!data.documentId) {
+        // Soft-fail: generation path sends text directly
+        return null;
+      }
+    }
+    return (data.documentId as string) || null;
   };
 
   const onGenerate = async () => {
@@ -147,23 +174,26 @@ function StudioInner() {
     }
     try {
       let docId = documentId;
-      if (!docId) {
+      if (!docId && text.trim()) {
         setStep("ingesting");
         docId = await runTextIngest();
-        setDocumentId(docId);
+        if (docId) setDocumentId(docId);
       }
-      if (!docId) throw new Error("No document");
+      // Generation works with text alone (document row is optional for guests)
+      if (!docId && !text.trim()) {
+        throw new Error("Paste some text or upload a file first");
+      }
 
       setStep("generating");
-      if (includeDiagrams || includeFlashcardImages) {
-        // will switch label once request is in flight
-      }
 
+      // Always send text + documentId so generation works even if document
+      // re-read is blocked (guest RLS). user_id NULL in DB is normal for guests.
       const res = await fetch("/api/generate", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          documentId: docId,
+          documentId: docId || undefined,
+          text: text.trim() || undefined,
           difficulty,
           includeDiagrams,
           includeFlashcardImages,
@@ -179,7 +209,8 @@ function StudioInner() {
             },
           });
         } else {
-          throw new Error(data.error || "Generation failed");
+          const msg = [data.error, data.detail].filter(Boolean).join(" — ");
+          throw new Error(msg || "Generation failed");
         }
         setStep("ready");
         return;
