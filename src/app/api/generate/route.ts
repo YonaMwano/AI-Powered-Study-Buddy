@@ -95,14 +95,29 @@ export async function POST(req: NextRequest) {
     });
 
     let finalStudy = study;
+    let imageWarning: string | undefined;
+    let diagramsAdded = 0;
+    let flashcardImagesAdded = 0;
     if (user && (includeDiagrams || includeFlashcardImages)) {
       try {
-        finalStudy = await attachIllustrations(study, {
+        const ill = await attachIllustrations(study, {
           diagrams: !!includeDiagrams,
           flashcardImages: !!includeFlashcardImages,
         });
+        finalStudy = ill.study;
+        diagramsAdded = ill.diagramsAdded;
+        flashcardImagesAdded = ill.flashcardImagesAdded;
+        if (ill.skipped) {
+          imageWarning =
+            ill.skipReason ||
+            "Images skipped (token/quota limit) — study generated as text only";
+          console.warn("illustrations skipped:", imageWarning);
+        }
       } catch (illErr) {
-        console.warn("Illustration step failed, continuing without", illErr);
+        // Never fail the whole study because of images
+        console.warn("Illustration step failed, continuing text-only", illErr);
+        imageWarning =
+          "Image generation failed — study generated as text only";
       }
     }
 
@@ -137,8 +152,8 @@ export async function POST(req: NextRequest) {
         model_vision: null,
         tokens_in: tokensIn,
         tokens_out: tokensOut,
-        has_diagrams: !!(includeDiagrams && user),
-        has_flashcard_images: !!(includeFlashcardImages && user),
+        has_diagrams: diagramsAdded > 0,
+        has_flashcard_images: flashcardImagesAdded > 0,
       })
       .select("id, title")
       .single();
@@ -165,6 +180,7 @@ export async function POST(req: NextRequest) {
 
     return NextResponse.json({
       studyId: row.id,
+      imageWarning: imageWarning || undefined,
       title: row.title,
     });
   } catch (err) {

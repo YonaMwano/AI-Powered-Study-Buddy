@@ -217,6 +217,9 @@ function StudioInner() {
       }
 
       toast.success("Study ready");
+      if (data.imageWarning) {
+        toast.message(String(data.imageWarning));
+      }
       router.push(`/study/${data.studyId}`);
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Something went wrong");

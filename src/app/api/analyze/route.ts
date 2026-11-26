@@ -71,37 +71,62 @@ export async function POST(req: NextRequest) {
       });
     }
 
-    const { text, tables, headings, tokens } = await visionExtract(
-      images,
-      doc.original_filename || undefined
-    );
+    let text = "";
+    let tables: string[] = [];
+    let headings: string[] = [];
+    let tokens = 0;
+    let visionWarning: string | undefined;
+
+    try {
+      const result = await visionExtract(
+        images,
+        doc.original_filename || undefined
+      );
+      text = result.text;
+      tables = result.tables;
+      headings = result.headings;
+      tokens = result.tokens;
+    } catch (visionErr) {
+      console.warn("visionExtract failed — using existing text only", visionErr);
+      visionWarning =
+        "Vision model token/limit reached — using any existing text only";
+    }
 
     const mergedText = [doc.extracted_text, text]
       .filter(Boolean)
       .join("\n\n")
       .trim();
 
-    await supabase
-      .from("documents")
-      .update({
-        extracted_text: mergedText,
-        status: "ingested",
-      })
-      .eq("id", documentId);
+    if (mergedText) {
+      await supabase
+        .from("documents")
+        .update({
+          extracted_text: mergedText,
+          status: "ingested",
+        })
+        .eq("id", documentId);
+    }
 
+    // Never hard-fail: return whatever text we have
     return NextResponse.json({
       documentId,
-      text: mergedText,
+      text: mergedText || doc.extracted_text || "",
       tables,
       headings,
-      usedVision: true,
+      usedVision: !visionWarning && !!text,
       tokens,
+      warning: visionWarning,
     });
   } catch (err) {
     console.error("analyze error", err);
-    return NextResponse.json(
-      { error: "Analysis failed. Please try again." },
-      { status: 500 }
-    );
+    // Last resort: do not 500 if we can return empty text
+    return NextResponse.json({
+      documentId: null,
+      text: "",
+      tables: [],
+      headings: [],
+      usedVision: false,
+      warning: "Analysis failed — continue with pasted text if available",
+    });
   }
 }

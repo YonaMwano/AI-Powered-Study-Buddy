@@ -118,10 +118,19 @@ ${extraContext ? `Context: ${extraContext}` : ""}`,
     ];
 
     for (const img of batch) {
+      // Skip huge data-URLs that blow vision token limits
+      if (typeof img === "string" && img.startsWith("data:") && img.length > 2_500_000) {
+        console.warn("skipping oversized image for vision (~token limit)");
+        continue;
+      }
       contentParts.push({
         type: "image_url",
         image_url: { url: img },
       });
+    }
+    // If all images skipped, do not call the model
+    if (contentParts.length === 1) {
+      continue;
     }
 
     try {
