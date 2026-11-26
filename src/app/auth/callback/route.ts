@@ -21,7 +21,7 @@ export async function GET(request: NextRequest) {
   }
 
   // Build redirect first so we can attach cookies to it
-  let response = NextResponse.redirect(
+  const response = NextResponse.redirect(
     `${origin}${safeNext}${safeNext.includes("?") ? "&" : "?"}auth=success`
   );
 

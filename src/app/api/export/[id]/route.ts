@@ -1,40 +1,49 @@
 import { NextRequest, NextResponse } from "next/server";
-import { createClient, createServiceClient } from "@/lib/supabase/server";
+import { createClient } from "@/lib/supabase/server";
 
 export const runtime = "nodejs";
 
+/**
+ * Poll export job status / refresh signed URL.
+ * Uses the user session client only (no service role key).
+ */
 export async function GET(
   _req: NextRequest,
-  { params }: { params: Promise<{ id: string }> }
+  context: { params: Promise<{ id: string }> }
 ) {
   try {
-    const { id } = await params;
+    const { id } = await context.params;
     const supabase = await createClient();
     const {
       data: { user },
     } = await supabase.auth.getUser();
 
-    const service = await createServiceClient();
-    const { data: job, error } = await service
+    if (!user) {
+      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    }
+
+    const { data: job, error } = await supabase
       .from("exports")
       .select("*")
       .eq("id", id)
+      .eq("user_id", user.id)
       .single();
 
     if (error || !job) {
-      return NextResponse.json({ error: "Export not found" }, { status: 404 });
+      return NextResponse.json({ error: "Export job not found" }, { status: 404 });
     }
 
-    if (job.user_id && user?.id !== job.user_id) {
-      return NextResponse.json({ error: "Forbidden" }, { status: 403 });
-    }
-
-    let signedUrl = job.file_url;
+    // Optionally refresh a storage signed URL
+    let signedUrl = job.file_url as string | null;
     if (job.storage_path && job.status === "ready") {
-      const { data } = await service.storage
-        .from("exports")
-        .createSignedUrl(job.storage_path, 60 * 60 * 24);
-      if (data?.signedUrl) signedUrl = data.signedUrl;
+      try {
+        const { data: signed } = await supabase.storage
+          .from("exports")
+          .createSignedUrl(job.storage_path, 60 * 60 * 24);
+        if (signed?.signedUrl) signedUrl = signed.signedUrl;
+      } catch {
+        /* keep existing file_url */
+      }
     }
 
     return NextResponse.json({
@@ -44,7 +53,6 @@ export async function GET(
       bytes: job.bytes,
       format: job.format,
       error: job.error_message,
-      expiresIn: 24 * 3600,
     });
   } catch (err) {
     console.error(err);
