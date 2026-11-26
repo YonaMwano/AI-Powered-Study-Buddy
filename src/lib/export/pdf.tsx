@@ -1,366 +1,301 @@
-/**
- * PDF export via pdf-lib (no pdfkit / Helvetica filesystem fonts).
- * Works on Vercel Node runtime without bundling standard font files.
- */
+import React from "react";
 import {
-  PDFDocument,
-  StandardFonts,
-  rgb,
-  type PDFFont,
-  type PDFPage,
-  type PDFImage,
-} from "pdf-lib";
+  Document,
+  Page,
+  Text,
+  View,
+  StyleSheet,
+  Image,
+  pdf,
+} from "@react-pdf/renderer";
 import type { Study } from "@/types";
-import { difficultyLabel } from "./theme";
-import { resolveStudyImages } from "./images";
+import { DOC_THEME, difficultyLabel } from "./theme";
 
-const PAGE_W = 595.28; // A4
-const PAGE_H = 841.89;
-const MARGIN = 48;
-const CONTENT_W = PAGE_W - MARGIN * 2;
-const INK = rgb(0.06, 0.09, 0.16);
-const MUTED = rgb(0.39, 0.45, 0.55);
-const ACCENT = rgb(0.39, 0.4, 0.95);
-const SUCCESS = rgb(0.06, 0.73, 0.51);
-const KEY_BG = rgb(0.95, 0.96, 0.98);
+const s = StyleSheet.create({
+  page: {
+    paddingTop: DOC_THEME.marginPt,
+    paddingBottom: DOC_THEME.marginPt + 24,
+    paddingHorizontal: DOC_THEME.marginPt,
+    fontFamily: DOC_THEME.fontBody,
+    fontSize: DOC_THEME.body,
+    color: DOC_THEME.ink,
+    lineHeight: DOC_THEME.lineHeight,
+  },
+  coverTitle: {
+    fontSize: 32,
+    fontFamily: DOC_THEME.fontHeading,
+    marginBottom: 12,
+    color: DOC_THEME.ink,
+  },
+  coverMeta: {
+    fontSize: DOC_THEME.small,
+    color: DOC_THEME.muted,
+    marginBottom: 8,
+  },
+  accentBar: {
+    height: 4,
+    width: 80,
+    backgroundColor: DOC_THEME.accent,
+    marginVertical: 16,
+  },
+  sectionTitle: {
+    fontSize: DOC_THEME.h1,
+    fontFamily: DOC_THEME.fontHeading,
+    marginBottom: 16,
+    marginTop: 8,
+    color: DOC_THEME.ink,
+  },
+  heading: {
+    fontSize: DOC_THEME.h2,
+    fontFamily: DOC_THEME.fontHeading,
+    marginBottom: 8,
+    marginTop: 12,
+    color: DOC_THEME.ink,
+  },
+  body: {
+    fontSize: DOC_THEME.body,
+    marginBottom: 6,
+    color: DOC_THEME.ink,
+  },
+  keyBox: {
+    backgroundColor: DOC_THEME.paperAlt,
+    borderLeftWidth: 3,
+    borderLeftColor: DOC_THEME.accent,
+    padding: 10,
+    marginTop: 8,
+    marginBottom: 12,
+  },
+  keyTitle: {
+    fontSize: DOC_THEME.small,
+    color: DOC_THEME.accent,
+    marginBottom: 4,
+    textTransform: "uppercase",
+  },
+  bullet: {
+    fontSize: DOC_THEME.body,
+    marginBottom: 3,
+    paddingLeft: 8,
+  },
+  qPrompt: {
+    fontSize: DOC_THEME.body,
+    fontFamily: DOC_THEME.fontHeading,
+    marginBottom: 6,
+  },
+  option: {
+    fontSize: DOC_THEME.body,
+    marginBottom: 2,
+    paddingLeft: 12,
+  },
+  answer: {
+    fontSize: DOC_THEME.small,
+    color: DOC_THEME.success,
+    marginTop: 4,
+    marginBottom: 10,
+  },
+  cardBox: {
+    borderWidth: 1,
+    borderColor: DOC_THEME.border,
+    borderRadius: 4,
+    padding: 10,
+    marginBottom: 8,
+    width: "48%",
+  },
+  cardFront: {
+    fontSize: DOC_THEME.body,
+    fontFamily: DOC_THEME.fontHeading,
+    marginBottom: 4,
+  },
+  cardBack: {
+    fontSize: DOC_THEME.small,
+    color: DOC_THEME.muted,
+  },
+  footer: {
+    position: "absolute",
+    bottom: 24,
+    left: DOC_THEME.marginPt,
+    right: DOC_THEME.marginPt,
+    fontSize: 8,
+    color: DOC_THEME.muted,
+    flexDirection: "row",
+    justifyContent: "space-between",
+  },
+  row: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    justifyContent: "space-between",
+  },
+  diagram: {
+    maxWidth: "60%",
+    maxHeight: 180,
+    marginVertical: 10,
+    objectFit: "contain",
+  },
+});
 
-type Ctx = {
-  doc: PDFDocument;
-  page: PDFPage;
-  font: PDFFont;
-  fontBold: PDFFont;
-  y: number;
-};
-
-function newPage(ctx: Ctx) {
-  ctx.page = ctx.doc.addPage([PAGE_W, PAGE_H]);
-  ctx.y = PAGE_H - MARGIN;
-  drawFooter(ctx);
+function Footer({ page, total }: { page: number; total: number }) {
+  return (
+    <View style={s.footer} fixed>
+      <Text>StudyBuddy AI</Text>
+      <Text>
+        Page {page} of {total}
+      </Text>
+    </View>
+  );
 }
 
-function drawFooter(ctx: Ctx) {
-  ctx.page.drawText("StudyBuddy AI", {
-    x: MARGIN,
-    y: 28,
-    size: 8,
-    font: ctx.font,
-    color: MUTED,
-  });
+function StudyPdfDocument({ study }: { study: Study }) {
+  const sections = study.explainer?.sections ?? [];
+  const questions = study.quiz?.questions ?? [];
+  const cards = study.flashcards?.cards ?? [];
+
+  const totalPages = Math.max(
+    2,
+    1 +
+      Math.ceil(sections.length / 2) +
+      Math.ceil(questions.length / 4) +
+      Math.ceil(cards.length / 6)
+  );
+
+  return (
+    <Document title={study.title} author="StudyBuddy AI">
+      <Page size="A4" style={s.page}>
+        <Text style={s.coverTitle}>{study.title}</Text>
+        <View style={s.accentBar} />
+        <Text style={s.coverMeta}>
+          Difficulty: {difficultyLabel(study.difficulty)}
+        </Text>
+        <Text style={s.coverMeta}>
+          {sections.length} sections · {questions.length} quiz questions ·{" "}
+          {cards.length} flashcards
+        </Text>
+        <Text style={[s.coverMeta, { marginTop: 24 }]}>
+          Generated by StudyBuddy AI
+        </Text>
+        <Footer page={1} total={totalPages} />
+      </Page>
+
+      <Page size="A4" style={s.page} wrap>
+        <Text style={s.sectionTitle}>Explainer</Text>
+        {sections.map((sec, i) => (
+          <View key={i} wrap={false} minPresenceAhead={60}>
+            <Text style={s.heading}>{sec.heading}</Text>
+            {sec.body.map((p, j) => (
+              <Text key={j} style={s.body}>
+                {p}
+              </Text>
+            ))}
+            {sec.keyPoints && sec.keyPoints.length > 0 && (
+              <View style={s.keyBox}>
+                <Text style={s.keyTitle}>Key points</Text>
+                {sec.keyPoints.map((kp, k) => (
+                  <Text key={k} style={s.bullet}>
+                    • {kp}
+                  </Text>
+                ))}
+              </View>
+            )}
+            {sec.diagramUrl ? (
+              // eslint-disable-next-line jsx-a11y/alt-text
+              <Image src={sec.diagramUrl} style={s.diagram} />
+            ) : null}
+          </View>
+        ))}
+        <Footer page={2} total={totalPages} />
+      </Page>
+
+      <Page size="A4" style={s.page} wrap>
+        <Text style={s.sectionTitle}>Quiz</Text>
+        {questions.map((q, i) => (
+          <View
+            key={i}
+            wrap={false}
+            minPresenceAhead={40}
+            style={{ marginBottom: 12 }}
+          >
+            <Text style={s.qPrompt}>
+              {i + 1}. {q.prompt}
+            </Text>
+            {q.options?.map((opt, j) => (
+              <Text key={j} style={s.option}>
+                {String.fromCharCode(65 + j)}. {opt}
+              </Text>
+            ))}
+            <Text style={s.answer}>Answer: {q.answer}</Text>
+            {q.explanation ? (
+              <Text
+                style={[
+                  s.body,
+                  { color: DOC_THEME.muted, fontSize: DOC_THEME.small },
+                ]}
+              >
+                {q.explanation}
+              </Text>
+            ) : null}
+          </View>
+        ))}
+        <Footer page={3} total={totalPages} />
+      </Page>
+
+      <Page size="A4" style={s.page} wrap>
+        <Text style={s.sectionTitle}>Flashcards</Text>
+        <View style={s.row}>
+          {cards.map((c, i) => (
+            <View key={i} style={s.cardBox} wrap={false}>
+              <Text style={s.cardFront}>{c.front}</Text>
+              <Text style={s.cardBack}>{c.back}</Text>
+            </View>
+          ))}
+        </View>
+        <Footer page={4} total={totalPages} />
+      </Page>
+    </Document>
+  );
 }
 
-function ensureSpace(ctx: Ctx, needed: number) {
-  if (ctx.y - needed < MARGIN + 36) {
-    newPage(ctx);
+/** Collect a Node Readable / Web ReadableStream / Uint8Array into a Buffer */
+async function toNodeBuffer(data: unknown): Promise<Buffer> {
+  if (Buffer.isBuffer(data)) {
+    return data;
   }
-}
-
-function wrapText(
-  text: string,
-  font: PDFFont,
-  size: number,
-  maxWidth: number
-): string[] {
-  const words = (text || "").split(/\s+/).filter(Boolean);
-  if (!words.length) return [""];
-  const lines: string[] = [];
-  let line = "";
-  for (const w of words) {
-    const test = line ? `${line} ${w}` : w;
-    const width = font.widthOfTextAtSize(test, size);
-    if (width > maxWidth && line) {
-      lines.push(line);
-      line = w;
-    } else {
-      line = test;
-    }
+  if (data instanceof Uint8Array) {
+    return Buffer.from(data);
   }
-  if (line) lines.push(line);
-  return lines;
-}
-
-function drawParagraph(
-  ctx: Ctx,
-  text: string,
-  opts: {
-    size?: number;
-    bold?: boolean;
-    color?: ReturnType<typeof rgb>;
-    gapAfter?: number;
-    maxWidth?: number;
-  } = {}
-) {
-  const size = opts.size ?? 11;
-  const font = opts.bold ? ctx.fontBold : ctx.font;
-  const color = opts.color ?? INK;
-  const maxWidth = opts.maxWidth ?? CONTENT_W;
-  const lines = wrapText(text, font, size, maxWidth);
-  const lineHeight = size * 1.45;
-
-  for (const line of lines) {
-    ensureSpace(ctx, lineHeight + 2);
-    ctx.page.drawText(line, {
-      x: MARGIN,
-      y: ctx.y - size,
-      size,
-      font,
-      color,
+  // Node.js Readable stream
+  if (
+    data &&
+    typeof data === "object" &&
+    typeof (data as NodeJS.ReadableStream).on === "function"
+  ) {
+    const stream = data as NodeJS.ReadableStream;
+    const chunks: Buffer[] = [];
+    await new Promise<void>((resolve, reject) => {
+      stream.on("data", (chunk: Buffer | string) => {
+        chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
+      });
+      stream.on("end", () => resolve());
+      stream.on("error", reject);
     });
-    ctx.y -= lineHeight;
+    return Buffer.concat(chunks);
   }
-  ctx.y -= opts.gapAfter ?? 4;
-}
-
-async function embedDataImage(
-  doc: PDFDocument,
-  dataUri: string | null | undefined
-): Promise<PDFImage | null> {
-  if (!dataUri || !dataUri.startsWith("data:")) return null;
-  try {
-    const match = dataUri.match(/^data:([^;]+);base64,(.+)$/);
-    if (!match) return null;
-    const mime = match[1].toLowerCase();
-    const bytes = Buffer.from(match[2], "base64");
-    if (mime.includes("png")) return await doc.embedPng(bytes);
-    if (mime.includes("jpeg") || mime.includes("jpg"))
-      return await doc.embedJpg(bytes);
-    try {
-      return await doc.embedPng(bytes);
-    } catch {
-      return await doc.embedJpg(bytes);
+  // Web ReadableStream
+  if (data && typeof data === "object" && "getReader" in (data as object)) {
+    const reader = (data as ReadableStream<Uint8Array>).getReader();
+    const chunks: Uint8Array[] = [];
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      if (value) chunks.push(value);
     }
-  } catch {
-    return null;
+    return Buffer.concat(chunks.map((c) => Buffer.from(c)));
   }
-}
-
-function drawImage(
-  ctx: Ctx,
-  image: PDFImage,
-  maxW = CONTENT_W * 0.55,
-  maxH = 160
-) {
-  const scale = Math.min(maxW / image.width, maxH / image.height, 1);
-  const w = image.width * scale;
-  const h = image.height * scale;
-  ensureSpace(ctx, h + 16);
-  ctx.page.drawImage(image, {
-    x: MARGIN,
-    y: ctx.y - h,
-    width: w,
-    height: h,
-  });
-  ctx.y -= h + 12;
+  // Last resort
+  return Buffer.from(data as ArrayBuffer);
 }
 
 export async function buildPdfBuffer(study: Study): Promise<Buffer> {
-  const resolved = (await resolveStudyImages(study)) as Study;
-  const sections = resolved.explainer?.sections ?? [];
-  const questions = resolved.quiz?.questions ?? [];
-  const cards = resolved.flashcards?.cards ?? [];
-
-  const doc = await PDFDocument.create();
-  doc.setTitle(study.title || "Study");
-  doc.setAuthor("StudyBuddy AI");
-
-  const font = await doc.embedFont(StandardFonts.Helvetica);
-  const fontBold = await doc.embedFont(StandardFonts.HelveticaBold);
-
-  const ctx: Ctx = {
-    doc,
-    page: doc.addPage([PAGE_W, PAGE_H]),
-    font,
-    fontBold,
-    y: PAGE_H - MARGIN,
-  };
-  drawFooter(ctx);
-
-  drawParagraph(ctx, study.title || "Study set", {
-    size: 26,
-    bold: true,
-    gapAfter: 10,
-  });
-  ctx.page.drawRectangle({
-    x: MARGIN,
-    y: ctx.y - 4,
-    width: 72,
-    height: 4,
-    color: ACCENT,
-  });
-  ctx.y -= 20;
-
-  drawParagraph(
-    ctx,
-    `Difficulty: ${difficultyLabel(study.difficulty || "intermediate")}`,
-    { size: 10, color: MUTED, gapAfter: 2 }
-  );
-  drawParagraph(
-    ctx,
-    `${sections.length} sections · ${questions.length} quiz questions · ${cards.length} flashcards`,
-    { size: 10, color: MUTED, gapAfter: 16 }
-  );
-  drawParagraph(ctx, "Generated by StudyBuddy AI", {
-    size: 10,
-    color: MUTED,
-  });
-
-  newPage(ctx);
-  drawParagraph(ctx, "Explainer", { size: 18, bold: true, gapAfter: 12 });
-
-  for (const sec of sections) {
-    ensureSpace(ctx, 80);
-    drawParagraph(ctx, sec.heading, { size: 13, bold: true, gapAfter: 6 });
-    for (const p of sec.body || []) {
-      drawParagraph(ctx, p, { size: 11, gapAfter: 4 });
-    }
-    if (sec.keyPoints?.length) {
-      ensureSpace(ctx, 40 + sec.keyPoints.length * 14);
-      const top = ctx.y;
-      let previewY = ctx.y - 14;
-      for (const kp of sec.keyPoints) {
-        const lines = wrapText(`• ${kp}`, font, 10, CONTENT_W - 16);
-        previewY -= lines.length * 13;
-      }
-      const boxH = Math.max(24, top - previewY + 8);
-      ctx.page.drawRectangle({
-        x: MARGIN,
-        y: top - boxH,
-        width: CONTENT_W,
-        height: boxH,
-        color: KEY_BG,
-      });
-      ctx.page.drawRectangle({
-        x: MARGIN,
-        y: top - boxH,
-        width: 3,
-        height: boxH,
-        color: ACCENT,
-      });
-      ctx.y -= 6;
-      drawParagraph(ctx, "KEY POINTS", {
-        size: 8,
-        bold: true,
-        color: ACCENT,
-        gapAfter: 4,
-      });
-      for (const kp of sec.keyPoints) {
-        drawParagraph(ctx, `• ${kp}`, { size: 10, gapAfter: 2 });
-      }
-      ctx.y -= 6;
-    }
-    if (sec.diagramUrl) {
-      const img = await embedDataImage(doc, sec.diagramUrl);
-      if (img) drawImage(ctx, img);
-    }
-    ctx.y -= 8;
-  }
-
-  newPage(ctx);
-  drawParagraph(ctx, "Quiz", { size: 18, bold: true, gapAfter: 12 });
-
-  questions.forEach((q, i) => {
-    ensureSpace(ctx, 60);
-    drawParagraph(ctx, `${i + 1}. ${q.prompt}`, {
-      size: 11,
-      bold: true,
-      gapAfter: 4,
-    });
-    (q.options || []).forEach((opt, j) => {
-      drawParagraph(ctx, `${String.fromCharCode(65 + j)}. ${opt}`, {
-        size: 10,
-        gapAfter: 2,
-      });
-    });
-    drawParagraph(ctx, `Answer: ${q.answer}`, {
-      size: 9,
-      color: SUCCESS,
-      gapAfter: 2,
-    });
-    if (q.explanation) {
-      drawParagraph(ctx, q.explanation, {
-        size: 9,
-        color: MUTED,
-        gapAfter: 8,
-      });
-    } else {
-      ctx.y -= 6;
-    }
-  });
-
-  newPage(ctx);
-  drawParagraph(ctx, "Flashcards", { size: 18, bold: true, gapAfter: 12 });
-
-  const colW = (CONTENT_W - 12) / 2;
-  let col = 0;
-  let rowTop = ctx.y;
-
-  for (const c of cards) {
-    const frontLines = wrapText(c.front, fontBold, 10, colW - 16);
-    const backLines = wrapText(c.back, font, 9, colW - 16);
-    const cardH = Math.max(
-      56,
-      16 + frontLines.length * 13 + backLines.length * 12
-    );
-
-    if (col === 0) {
-      ensureSpace(ctx, cardH + 10);
-      rowTop = ctx.y;
-    }
-
-    const x = MARGIN + col * (colW + 12);
-    const yBottom = rowTop - cardH;
-
-    ctx.page.drawRectangle({
-      x,
-      y: yBottom,
-      width: colW,
-      height: cardH,
-      borderColor: rgb(0.89, 0.91, 0.94),
-      borderWidth: 1,
-    });
-
-    let ty = rowTop - 12;
-    for (const line of frontLines) {
-      ctx.page.drawText(line, {
-        x: x + 8,
-        y: ty - 10,
-        size: 10,
-        font: fontBold,
-        color: INK,
-      });
-      ty -= 13;
-    }
-    ty -= 4;
-    for (const line of backLines) {
-      ctx.page.drawText(line, {
-        x: x + 8,
-        y: ty - 9,
-        size: 9,
-        font: font,
-        color: MUTED,
-      });
-      ty -= 12;
-    }
-
-    col = col === 0 ? 1 : 0;
-    if (col === 0) {
-      ctx.y = rowTop - cardH - 10;
-    }
-  }
-
-  const pages = doc.getPages();
-  const total = pages.length;
-  pages.forEach((page, idx) => {
-    const label = `Page ${idx + 1} of ${total}`;
-    const w = font.widthOfTextAtSize(label, 8);
-    page.drawText(label, {
-      x: PAGE_W - MARGIN - w,
-      y: 28,
-      size: 8,
-      font,
-      color: MUTED,
-    });
-  });
-
-  const bytes = await doc.save();
-  return Buffer.from(bytes);
+  const doc = <StudyPdfDocument study={study} />;
+  const instance = pdf(doc);
+  // @react-pdf/renderer toBuffer() may return Buffer | Promise<NodeJS.ReadableStream> | ReadableStream depending on version
+  const result = await instance.toBuffer();
+  return toNodeBuffer(result);
 }

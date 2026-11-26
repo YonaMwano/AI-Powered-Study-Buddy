@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useSearchParams } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { BookOpen, Mail, Loader2 } from "lucide-react";
 import { useState, Suspense } from "react";
 import { createClient } from "@/lib/supabase/client";
@@ -18,6 +18,7 @@ import {
 import { toast } from "sonner";
 
 function LoginForm() {
+  const router = useRouter();
   const searchParams = useSearchParams();
   const next = searchParams.get("next") || "/studio";
   const pendingUpload = searchParams.get("pendingUpload") === "1";
@@ -54,24 +55,18 @@ function LoginForm() {
     setLoading("email");
     const { error } = await supabase.auth.signInWithPassword({ email, password });
     if (error) {
-      const msg =
-        error.message.toLowerCase().includes("email not confirmed")
-          ? "Confirm your email first (check inbox / spam), or disable email confirmations in Supabase Auth settings."
-          : error.message.toLowerCase().includes("invalid login")
-            ? "Invalid email or password"
-            : error.message;
-      toast.error(msg);
+      toast.error(error.message);
       setLoading(null);
       return;
     }
     toast.success("Signed in");
     const target = pendingUpload ? `${next}?pendingUpload=1` : next;
-    // Full navigation so session cookies are applied everywhere
-    window.location.assign(target);
+    router.push(target);
+    router.refresh();
   }
 
   return (
-    <div className="paper flex min-h-screen">
+    <div className="flex min-h-screen">
       <div className="flex w-full flex-col justify-center px-4 py-12 sm:px-6 lg:w-1/2 lg:px-12">
         <div className="mx-auto w-full max-w-md">
           <Link href="/" className="mb-8 flex items-center gap-2 font-semibold text-slate-900 dark:text-slate-50">
@@ -110,7 +105,7 @@ function LoginForm() {
                   <span className="w-full border-t border-slate-200 dark:border-slate-700" />
                 </div>
                 <div className="relative flex justify-center text-xs uppercase">
-                  <span className="bg-[var(--paper)] px-2 text-slate-500 dark:text-slate-400">or</span>
+                  <span className="bg-white px-2 text-slate-500 dark:bg-slate-950 dark:text-slate-400">or</span>
                 </div>
               </div>
 
@@ -154,7 +149,7 @@ function LoginForm() {
 
 export default function LoginPage() {
   return (
-    <Suspense fallback={<div className="paper min-h-screen" />}>
+    <Suspense fallback={<div className="min-h-screen paper" />}>
       <LoginForm />
     </Suspense>
   );

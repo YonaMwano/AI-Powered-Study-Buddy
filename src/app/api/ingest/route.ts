@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { createClient } from "@/lib/supabase/server";
+import { createClient, createServiceClient } from "@/lib/supabase/server";
 import { detectSourceType, isAllowedMime, MAX_FILE_BYTES } from "@/lib/ingest/detect";
 import { extractFromBuffer } from "@/lib/ingest/extract";
 import { getOrCreateGuestId } from "@/lib/guest";
@@ -18,12 +18,13 @@ export async function POST(req: NextRequest) {
     const formData = await req.formData();
     const file = formData.get("file") as File | null;
     const plainText = formData.get("text") as string | null;
-
+    
     // ----- Text-only path (allowed for guests) -----
     if (plainText && plainText.trim().length > 0 && !file) {
       const guestId = user ? null : await getOrCreateGuestId();
+      const service = await createServiceClient();
 
-      const { data: doc, error } = await supabase
+      const { data: doc, error } = await service
         .from("documents")
         .insert({
           user_id: user?.id ?? null,
@@ -40,14 +41,7 @@ export async function POST(req: NextRequest) {
       if (error || !doc) {
         console.error("insert text document", error);
         return NextResponse.json(
-          {
-            error:
-              error?.message?.includes("row-level security") ||
-              error?.code === "42501"
-                ? "Failed to save document — re-run supabase/schema.sql (RLS insert policies)"
-                : "Failed to save document",
-            detail: error?.message,
-          },
+          { error: "Failed to save document" },
           { status: 500 }
         );
       }
@@ -97,20 +91,23 @@ export async function POST(req: NextRequest) {
     const buffer = Buffer.from(await file.arrayBuffer());
     let sourceType = detectSourceType(mime, filename);
 
+    // Extract
     const extraction = await extractFromBuffer(buffer, sourceType, filename);
     sourceType = extraction.sourceType;
 
+    // Optional: upload original to Storage
     let originalUrl: string | null = null;
     const storagePath = `${user.id}/${crypto.randomUUID()}-${filename}`;
     try {
-      const { error: upErr } = await supabase.storage
+      const service = await createServiceClient();
+      const { error: upErr } = await service.storage
         .from("documents")
         .upload(storagePath, buffer, {
           contentType: mime,
           upsert: false,
         });
       if (!upErr) {
-        const { data: signed } = await supabase.storage
+        const { data: signed } = await service.storage
           .from("documents")
           .createSignedUrl(storagePath, 60 * 60 * 24 * 7);
         originalUrl = signed?.signedUrl ?? null;
@@ -119,7 +116,9 @@ export async function POST(req: NextRequest) {
       console.warn("Storage upload skipped", storageErr);
     }
 
-    const { data: doc, error } = await supabase
+    // Persist document
+    const service = await createServiceClient();
+    const { data: doc, error } = await service
       .from("documents")
       .insert({
         user_id: user.id,
@@ -137,14 +136,7 @@ export async function POST(req: NextRequest) {
     if (error || !doc) {
       console.error("insert document", error);
       return NextResponse.json(
-        {
-          error:
-            error?.message?.includes("row-level security") ||
-            error?.code === "42501"
-              ? "Failed to save document — re-run supabase/schema.sql (RLS insert policies)"
-              : "Failed to save document",
-          detail: error?.message,
-        },
+        { error: "Failed to save document" },
         { status: 500 }
       );
     }
@@ -153,19 +145,13 @@ export async function POST(req: NextRequest) {
       documentId: doc.id,
       sourceType,
       extractedTextPreview: (extraction.text || "").slice(0, 400),
-      needsVision:
-        sourceType === "pdf_scan" ||
-        sourceType === "image" ||
-        (Array.isArray(extraction.pageImages) &&
-          extraction.pageImages.length > 0),
+      pageCount: extraction.pageCount,
+      hasImages: (extraction.pageImages?.length ?? 0) > 0,
     });
   } catch (err) {
     console.error("ingest error", err);
     return NextResponse.json(
-      {
-        error:
-          err instanceof Error ? err.message : "Ingest failed. Please try again.",
-      },
+      { error: "Ingestion failed. Please try again." },
       { status: 500 }
     );
   }
