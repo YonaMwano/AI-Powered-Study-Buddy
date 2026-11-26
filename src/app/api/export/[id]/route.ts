@@ -1,40 +1,40 @@
 import { NextRequest, NextResponse } from "next/server";
-import { createClient } from "@/lib/supabase/server";
+import { createClient, createServiceClient } from "@/lib/supabase/server";
 
 export const runtime = "nodejs";
 
 export async function GET(
   _req: NextRequest,
-  context: { params: Promise<{ id: string }> }
+  { params }: { params: Promise<{ id: string }> }
 ) {
   try {
-    const { id } = await context.params;
+    const { id } = await params;
     const supabase = await createClient();
     const {
       data: { user },
     } = await supabase.auth.getUser();
 
-    if (!user) {
-      return NextResponse.json({ error: "Sign in required" }, { status: 401 });
-    }
-
-    const { data: job, error } = await supabase
+    const service = await createServiceClient();
+    const { data: job, error } = await service
       .from("exports")
       .select("*")
       .eq("id", id)
-      .eq("user_id", user.id)
       .single();
 
     if (error || !job) {
       return NextResponse.json({ error: "Export not found" }, { status: 404 });
     }
 
-    let signedUrl = job.file_url as string | null;
-    if (job.storage_path && !signedUrl) {
-      const { data } = await supabase.storage
+    if (job.user_id && user?.id !== job.user_id) {
+      return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+    }
+
+    let signedUrl = job.file_url;
+    if (job.storage_path && job.status === "ready") {
+      const { data } = await service.storage
         .from("exports")
         .createSignedUrl(job.storage_path, 60 * 60 * 24);
-      signedUrl = data?.signedUrl ?? null;
+      if (data?.signedUrl) signedUrl = data.signedUrl;
     }
 
     return NextResponse.json({
@@ -43,6 +43,8 @@ export async function GET(
       signedUrl,
       bytes: job.bytes,
       format: job.format,
+      error: job.error_message,
+      expiresIn: 24 * 3600,
     });
   } catch (err) {
     console.error(err);

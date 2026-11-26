@@ -14,13 +14,7 @@ export async function updateSession(request: NextRequest) {
         getAll() {
           return request.cookies.getAll();
         },
-        setAll(
-          cookiesToSet: {
-            name: string;
-            value: string;
-            options?: Parameters<typeof supabaseResponse.cookies.set>[2];
-          }[]
-        ) {
+        setAll(cookiesToSet) {
           cookiesToSet.forEach(({ name, value }) =>
             request.cookies.set(name, value)
           );
@@ -35,7 +29,7 @@ export async function updateSession(request: NextRequest) {
     }
   );
 
-  // Refresh the session so Server Components see the user
+  // Refresh session
   await supabase.auth.getUser();
 
   return supabaseResponse;
