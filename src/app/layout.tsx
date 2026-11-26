@@ -48,7 +48,7 @@ export default function RootLayout({
       className={`${inter.variable} ${sourceSerif.variable}`}
       suppressHydrationWarning
     >
-      <body className="paper min-h-screen antialiased text-slate-900 dark:text-slate-100">
+      <body className="min-h-screen antialiased">
         <ThemeProvider
           attribute="class"
           defaultTheme="system"

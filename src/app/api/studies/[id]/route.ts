@@ -1,21 +1,22 @@
 import { NextRequest, NextResponse } from "next/server";
-import { createClient } from "@/lib/supabase/server";
+import { createClient, createServiceClient } from "@/lib/supabase/server";
 import { getOrCreateGuestId } from "@/lib/guest";
 
 export const runtime = "nodejs";
 
 export async function GET(
   _req: NextRequest,
-  context: { params: Promise<{ id: string }> }
+  { params }: { params: Promise<{ id: string }> }
 ) {
   try {
-    const { id } = await context.params;
+    const { id } = await params;
     const supabase = await createClient();
     const {
       data: { user },
     } = await supabase.auth.getUser();
 
-    const { data: study, error } = await supabase
+    const service = await createServiceClient();
+    const { data: study, error } = await service
       .from("studies")
       .select("*")
       .eq("id", id)
@@ -25,6 +26,7 @@ export async function GET(
       return NextResponse.json({ error: "Study not found" }, { status: 404 });
     }
 
+    // AuthZ
     if (study.user_id) {
       if (!user || user.id !== study.user_id) {
         return NextResponse.json({ error: "Forbidden" }, { status: 403 });
@@ -45,10 +47,10 @@ export async function GET(
 
 export async function DELETE(
   _req: NextRequest,
-  context: { params: Promise<{ id: string }> }
+  { params }: { params: Promise<{ id: string }> }
 ) {
   try {
-    const { id } = await context.params;
+    const { id } = await params;
     const supabase = await createClient();
     const {
       data: { user },
@@ -58,14 +60,15 @@ export async function DELETE(
       return NextResponse.json({ error: "Sign in required" }, { status: 401 });
     }
 
-    const { error } = await supabase
+    const service = await createServiceClient();
+    const { error } = await service
       .from("studies")
       .delete()
       .eq("id", id)
       .eq("user_id", user.id);
 
     if (error) {
-      return NextResponse.json({ error: error.message }, { status: 500 });
+      return NextResponse.json({ error: "Delete failed" }, { status: 500 });
     }
     return NextResponse.json({ ok: true });
   } catch (err) {

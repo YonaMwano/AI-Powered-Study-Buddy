@@ -1,6 +1,5 @@
 /** Shared document theme so PDF / PPTX / DOCX look consistent */
 
-/** Built-in PDF fonts only (Helvetica) — custom fonts break @react-pdf on Vercel. */
 export const DOC_THEME = {
   fontHeading: "Helvetica",
   fontBody: "Helvetica",
@@ -12,7 +11,7 @@ export const DOC_THEME = {
   paperAlt: "#F8FAFC",
   success: "#10B981",
   border: "#E2E8F0",
-  marginPt: 48,
+  marginPt: 48, // ~0.67in
   marginIn: 0.75,
   lineHeight: 1.55,
   h1: 28,

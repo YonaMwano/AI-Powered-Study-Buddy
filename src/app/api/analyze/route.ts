@@ -1,7 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
-import { createClient } from "@/lib/supabase/server";
+import { createClient, createServiceClient } from "@/lib/supabase/server";
 import { visionExtract } from "@/lib/ai/groq";
-import { getOrCreateGuestId } from "@/lib/guest";
 
 export const runtime = "nodejs";
 export const maxDuration = 90;
@@ -23,7 +22,8 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    const { data: doc, error } = await supabase
+    const service = await createServiceClient();
+    const { data: doc, error } = await service
       .from("documents")
       .select("*")
       .eq("id", documentId)
@@ -33,16 +33,12 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "Document not found" }, { status: 404 });
     }
 
+    // Ownership check
     if (doc.user_id && user?.id !== doc.user_id) {
       return NextResponse.json({ error: "Forbidden" }, { status: 403 });
     }
-    if (!doc.user_id && doc.guest_id) {
-      const gid = await getOrCreateGuestId();
-      if (gid !== doc.guest_id) {
-        return NextResponse.json({ error: "Forbidden" }, { status: 403 });
-      }
-    }
 
+    // Already has good text and no images → skip vision
     if (
       doc.extracted_text &&
       doc.extracted_text.length > 100 &&
@@ -71,6 +67,7 @@ export async function POST(req: NextRequest) {
       });
     }
 
+    // Run vision
     const { text, tables, headings, tokens } = await visionExtract(
       images,
       doc.original_filename || undefined
@@ -81,7 +78,8 @@ export async function POST(req: NextRequest) {
       .join("\n\n")
       .trim();
 
-    await supabase
+    // Update document
+    await service
       .from("documents")
       .update({
         extracted_text: mergedText,
