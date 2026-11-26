@@ -106,6 +106,22 @@ export async function POST(req: NextRequest) {
       }
     }
 
+    // Ensure profile exists for signed-in users (avoids studies_user_id_fkey)
+    if (user) {
+      await supabase.from("profiles").upsert(
+        {
+          id: user.id,
+          display_name:
+            user.user_metadata?.full_name ||
+            user.user_metadata?.name ||
+            user.email?.split("@")[0] ||
+            "User",
+          avatar_url: user.user_metadata?.avatar_url || null,
+        },
+        { onConflict: "id" }
+      );
+    }
+
     const { data: row, error: insertErr } = await supabase
       .from("studies")
       .insert({

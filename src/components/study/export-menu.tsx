@@ -54,7 +54,7 @@ function saveBlob(blob: Blob, filename: string) {
   document.body.appendChild(a);
   a.click();
   a.remove();
-  setTimeout(() => URL.revokeObjectURL(objectUrl), 30_000);
+  setTimeout(() => URL.revokeObjectURL(objectUrl), 60_000);
 }
 
 export function ExportMenu({
@@ -73,52 +73,52 @@ export function ExportMenu({
       const res = await fetch("/api/export", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ studyId, format, delivery: "binary" }),
+        credentials: "include",
+        body: JSON.stringify({ studyId, format }),
       });
 
       const contentType = res.headers.get("content-type") || "";
 
       if (!res.ok) {
-        // Error responses are JSON
-        let message = "Export failed";
-        try {
-          const data = await res.json();
-          message = data.error || message;
-        } catch {
-          message = `Export failed (${res.status})`;
+        let message = `Export failed (${res.status})`;
+        if (contentType.includes("application/json")) {
+          try {
+            const data = await res.json();
+            message = data.error || message;
+          } catch {
+            /* keep default */
+          }
         }
         throw new Error(message);
       }
 
-      // Binary file response
-      if (
-        contentType.includes("application/pdf") ||
-        contentType.includes("officedocument") ||
-        contentType.includes("presentationml") ||
-        contentType.includes("octet-stream")
-      ) {
-        const blob = await res.blob();
-        if (blob.size < 32) throw new Error("Export produced an empty file");
-        const filename =
-          res.headers
-            .get("content-disposition")
-            ?.match(/filename="?([^";]+)"?/)?.[1] ||
-          `${title.replace(/[^a-z0-9]+/gi, "-").slice(0, 40)}.${format}`;
-        saveBlob(blob, filename);
-        toast.success(`${format.toUpperCase()} ready`);
-        setOpen(false);
-        return;
+      // Binary success
+      const blob = await res.blob();
+      if (blob.size < 20) throw new Error("Export produced an empty file");
+
+      // Guard: if server mistakenly returned JSON error as blob
+      if (contentType.includes("application/json")) {
+        const text = await blob.text();
+        try {
+          const data = JSON.parse(text);
+          throw new Error(data.error || "Export failed");
+        } catch (e) {
+          if (e instanceof Error && e.message !== "Export failed") throw e;
+          throw new Error("Export failed");
+        }
       }
 
-      // Fallback JSON with data URL
-      const data = await res.json();
-      if (!data.signedUrl) throw new Error(data.error || "No file returned");
-      const blobRes = await fetch(data.signedUrl);
-      const blob = await blobRes.blob();
-      saveBlob(blob, data.filename || `study.${format}`);
-      toast.success(`${format.toUpperCase()} ready`);
+      const filename =
+        res.headers
+          .get("content-disposition")
+          ?.match(/filename="?([^";]+)"?/)?.[1] ||
+        `${(title || "study").replace(/[^a-z0-9]+/gi, "-").slice(0, 40)}.${format}`;
+
+      saveBlob(blob, filename);
+      toast.success(`${format.toUpperCase()} downloaded`);
       setOpen(false);
     } catch (err) {
+      console.error(err);
       toast.error(err instanceof Error ? err.message : "Export failed");
     } finally {
       setLoading(null);

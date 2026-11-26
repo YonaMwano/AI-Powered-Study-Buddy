@@ -22,12 +22,10 @@ export async function POST(req: NextRequest) {
       data: { user },
     } = await supabase.auth.getUser();
 
-    const body = await req.json();
-    const { studyId, format, delivery } = body as {
+    const body = await req.json().catch(() => ({}));
+    const { studyId, format } = body as {
       studyId?: string;
       format?: ExportFormat;
-      /** "binary" = file bytes in response body (recommended). "json" = base64 URL. */
-      delivery?: "binary" | "json";
     };
 
     if (!studyId || !format || !["pdf", "docx", "pptx"].includes(format)) {
@@ -44,9 +42,13 @@ export async function POST(req: NextRequest) {
       .single();
 
     if (studyErr || !study) {
-      return NextResponse.json({ error: "Study not found" }, { status: 404 });
+      return NextResponse.json(
+        { error: "Study not found", detail: studyErr?.message },
+        { status: 404 }
+      );
     }
 
+    // Ownership: signed-in owner OR same guest cookie
     if (study.user_id) {
       if (!user || user.id !== study.user_id) {
         return NextResponse.json({ error: "Forbidden" }, { status: 403 });
@@ -54,6 +56,7 @@ export async function POST(req: NextRequest) {
     } else if (study.guest_id) {
       const guestId = await getOrCreateGuestId();
       if (guestId !== study.guest_id) {
+        // Allow if the requester is signed in and we cannot match guest — still forbid
         return NextResponse.json({ error: "Forbidden" }, { status: 403 });
       }
     }
@@ -82,11 +85,22 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    if (!buffer || buffer.length < 32) {
+    if (!buffer?.length || buffer.length < 20) {
       return NextResponse.json(
         { error: "Export produced an empty file" },
         { status: 500 }
       );
+    }
+
+    // PDF magic check
+    if (format === "pdf") {
+      const head = buffer.subarray(0, 5).toString("utf8");
+      if (!head.startsWith("%PDF")) {
+        return NextResponse.json(
+          { error: "PDF generation produced invalid output" },
+          { status: 500 }
+        );
+      }
     }
 
     const contentType = CONTENT_TYPES[format];
@@ -97,33 +111,20 @@ export async function POST(req: NextRequest) {
         .toLowerCase() || "study";
     const filename = `${safeTitle}.${format}`;
 
-    // Preferred path: stream file bytes (reliable downloads, no huge JSON)
-    if (delivery !== "json") {
-      return new NextResponse(new Uint8Array(buffer), {
-        status: 200,
-        headers: {
-          "Content-Type": contentType,
-          "Content-Disposition": `attachment; filename="${filename}"`,
-          "Content-Length": String(buffer.length),
-          "Cache-Control": "no-store",
-        },
-      });
-    }
-
-    // Optional JSON + data URL (legacy / debugging)
-    return NextResponse.json({
-      status: "ready",
-      signedUrl: `data:${contentType};base64,${buffer.toString("base64")}`,
-      bytes: buffer.length,
-      filename,
-      contentType,
+    return new NextResponse(new Uint8Array(buffer), {
+      status: 200,
+      headers: {
+        "Content-Type": contentType,
+        "Content-Disposition": `attachment; filename="${filename}"`,
+        "Content-Length": String(buffer.length),
+        "Cache-Control": "no-store",
+        "X-Content-Type-Options": "nosniff",
+      },
     });
   } catch (err) {
     console.error("export error", err);
     return NextResponse.json(
-      {
-        error: err instanceof Error ? err.message : "Export failed",
-      },
+      { error: err instanceof Error ? err.message : "Export failed" },
       { status: 500 }
     );
   }

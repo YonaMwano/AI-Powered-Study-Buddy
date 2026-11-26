@@ -1,24 +1,39 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { createClient } from "@/lib/supabase/client";
 import type { User } from "@supabase/supabase-js";
+import { createClient } from "@/lib/supabase/client";
 
+/**
+ * Live auth state. Uses onAuthStateChange so session survives reloads
+ * and OAuth redirects without a second sign-in click.
+ */
 export function useUser() {
   const [user, setUser] = useState<User | null>(null);
   const [loading, setLoading] = useState(true);
   const supabase = createClient();
 
   useEffect(() => {
-    supabase.auth.getUser().then(({ data }) => {
-      setUser(data.user);
-      setLoading(false);
-    });
-    const { data: sub } = supabase.auth.onAuthStateChange((_event, session) => {
+    let mounted = true;
+
+    supabase.auth.getSession().then(({ data: { session } }) => {
+      if (!mounted) return;
       setUser(session?.user ?? null);
       setLoading(false);
     });
-    return () => sub.subscription.unsubscribe();
+
+    const {
+      data: { subscription },
+    } = supabase.auth.onAuthStateChange((_event, session) => {
+      if (!mounted) return;
+      setUser(session?.user ?? null);
+      setLoading(false);
+    });
+
+    return () => {
+      mounted = false;
+      subscription.unsubscribe();
+    };
   }, [supabase.auth]);
 
   return { user, loading };
